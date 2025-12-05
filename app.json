@@ -1,4 +1,6 @@
 {
   "name": "VoltPathMobile",
-  "displayName": "VoltPathMobile"
+  "android": {
+    "package": "com.anonymous.voltpathmobile"
+  }
 }
