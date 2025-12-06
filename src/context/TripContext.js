@@ -1,7 +1,9 @@
 import React, { createContext, useState, useContext } from 'react';
 
-const TripContext = createContext();
+// 1. Create the context
+export const TripContext = createContext();
 
+// 2. Provider Component
 export const TripProvider = ({ children }) => {
   const [tripDetails, setTripDetails] = useState({
     startLocation: null,
@@ -30,6 +32,7 @@ export const TripProvider = ({ children }) => {
   );
 };
 
+// 3. Custom Hook (Best Practice)
 export const useTrip = () => {
   const context = useContext(TripContext);
   if (!context) {
@@ -37,5 +40,3 @@ export const useTrip = () => {
   }
   return context;
 };
-
-export default TripContext;

@@ -1,6 +1,6 @@
 import React from 'react';
 import { StatusBar } from 'react-native';
-import { TripProvider } from './context/TripContext';
+import  {TripProvider} from './context/TripContext';
 import AppNavigator from './navigation/AppNavigator';
 import { colors } from './theme/colors';
 

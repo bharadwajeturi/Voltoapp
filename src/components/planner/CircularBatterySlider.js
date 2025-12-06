@@ -1,41 +1,111 @@
-import React from 'react';
-import { View, Text, TouchableOpacity, StyleSheet } from 'react-native';
+import React, { useState, useRef } from 'react';
+import { View, Text, StyleSheet, PanResponder } from 'react-native';
 import { colors } from '../../theme/colors';
 
 const CircularBatterySlider = ({ value, onChange }) => {
-  const levels = [20, 40, 60, 80, 100];
+  const [sliderWidth, setSliderWidth] = useState(0);
+  const [sliderX, setSliderX] = useState(0); // Track X position on screen
+  
+  const percentage = Math.min(100, Math.max(0, value));
+
+  const handlePan = (gestureState) => {
+    if (sliderWidth === 0) return;
+    
+    // We can't easily get the absolute X position of the slider without onLayout measurement relative to screen or using measureInWindow.
+    // For a simple robust slider without re-renders, we'll use the delta approach or just assume margins.
+    
+    // BETTER APPROACH: Use the moveX (absolute touch) minus the estimated left margin/padding of the screen.
+    // In SmartPlanner, padding is 24. So slider starts around x=24.
+    const sliderStartX = 24; 
+    
+    const relativeX = gestureState.moveX - sliderStartX;
+    const boundedX = Math.min(Math.max(0, relativeX), sliderWidth);
+    
+    const newPercent = Math.round((boundedX / sliderWidth) * 100);
+    onChange(newPercent);
+  };
+
+  const panResponder = useRef(
+    PanResponder.create({
+      onStartShouldSetPanResponder: () => true,
+      onStartShouldSetPanResponderCapture: () => true, // Capture touch to prevent ScrollView from stealing it
+      onMoveShouldSetPanResponder: () => true,
+      onMoveShouldSetPanResponderCapture: () => true,
+      
+      onPanResponderGrant: (evt, gestureState) => {
+        // Handle tap/initial touch
+        handlePan({ moveX: evt.nativeEvent.pageX }); 
+      },
+      onPanResponderMove: (evt, gestureState) => handlePan(gestureState),
+      onPanResponderRelease: (evt, gestureState) => handlePan(gestureState),
+    })
+  ).current;
+
+  // Determine color based on level
+  const getBarColor = () => {
+    if (percentage < 20) return colors.danger;
+    if (percentage < 50) return colors.warning;
+    return colors.success;
+  };
 
   return (
     <View style={styles.container}>
-      <Text style={styles.label}>Battery Level</Text>
-      <View style={styles.row}>
-        {levels.map((level) => (
-          <TouchableOpacity
-            key={level}
-            style={[
-              styles.segment,
-              value >= level && styles.activeSegment,
-              value === level && styles.currentSegment
-            ]}
-            onPress={() => onChange(level)}
-          >
-            <Text style={[styles.text, value >= level && styles.activeText]}>{level}%</Text>
-          </TouchableOpacity>
-        ))}
+      <View style={styles.header}>
+        <Text style={styles.label}>Starting Battery</Text>
+        <Text style={[styles.value, { color: getBarColor() }]}>{percentage}%</Text>
+      </View>
+      
+      <View 
+        style={styles.track} 
+        onLayout={(e) => setSliderWidth(e.nativeEvent.layout.width)}
+        {...panResponder.panHandlers}
+      >
+        {/* Filled Bar */}
+        <View style={[styles.fill, { width: `${percentage}%`, backgroundColor: getBarColor() }]} />
+        
+        {/* Draggable Knob - Increased hit slop visually (transparent border or just visual knob) */}
+        <View style={[styles.knob, { left: `${percentage}%`, marginLeft: -12 }]} />
+      </View>
+      <View style={styles.labels}>
+        <Text style={styles.subLabel}>0%</Text>
+        <Text style={styles.subLabel}>50%</Text>
+        <Text style={styles.subLabel}>100%</Text>
       </View>
     </View>
   );
 };
 
 const styles = StyleSheet.create({
-  container: { marginVertical: 16 },
-  label: { color: colors.textSecondary, fontWeight: 'bold', marginBottom: 12 },
-  row: { flexDirection: 'row', justifyContent: 'space-between', backgroundColor: colors.surface, padding: 4, borderRadius: 12 },
-  segment: { flex: 1, paddingVertical: 12, alignItems: 'center', borderRadius: 8 },
-  activeSegment: { backgroundColor: 'rgba(0, 208, 156, 0.2)' },
-  currentSegment: { backgroundColor: colors.primary },
-  text: { color: colors.textSecondary, fontWeight: 'bold', fontSize: 12 },
-  activeText: { color: '#FFF' }
+  container: { marginBottom: 32 },
+  header: { flexDirection: 'row', justifyContent: 'space-between', marginBottom: 12, alignItems: 'center' },
+  label: { color: colors.textPrimary, fontWeight: 'bold', fontSize: 16 },
+  value: { fontSize: 18, fontWeight: 'bold' },
+  track: { 
+    height: 12, // Slightly taller for easier touch
+    backgroundColor: colors.surfaceHighlight, 
+    borderRadius: 6, 
+    position: 'relative', 
+    justifyContent: 'center',
+    marginVertical: 10 // Space for knob to not get clipped
+  },
+  fill: { height: '100%', borderRadius: 6 },
+  knob: { 
+    position: 'absolute', 
+    width: 28, // Bigger knob
+    height: 28, 
+    borderRadius: 14, 
+    backgroundColor: '#FFF', 
+    borderWidth: 2, 
+    borderColor: colors.surfaceHighlight,
+    elevation: 4,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.3,
+    shadowRadius: 2,
+    zIndex: 10
+  },
+  labels: { flexDirection: 'row', justifyContent: 'space-between', marginTop: 4 },
+  subLabel: { color: colors.textSecondary, fontSize: 12 }
 });
 
 export default CircularBatterySlider;
