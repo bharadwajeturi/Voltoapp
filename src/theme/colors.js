@@ -1,24 +1,24 @@
 export const colors = {
-  // Brand Colors
-  primary: '#00D09C',    // VoltPath Green (Active/Success)
-  primaryDark: '#00A87E', // Pressed state
+  // PRIMARY BRAND
+  primary: '#00D09C',        // Teal Green (Active/Success)
+  primaryDark: '#00A87E',    // Pressed state
   
-  // Backgrounds
-  background: '#0F172A', // Main Deep Navy/Black background
-  surface: '#1E293B',    // Card/Header background
-  surfaceHighlight: '#334155', // Inputs/Pressed Items
+  // BACKGROUNDS (Dark Theme)
+  background: '#0F172A',     // Deep Navy - Main BG
+  surface: '#1E293B',        // Slate - Card/Header
+  surfaceHighlight: '#334155', // Lighter - Inputs/Buttons
   
-  // Typography
-  textPrimary: '#F1F5F9', // Headings (White-ish)
-  textSecondary: '#94A3B8', // Subtitles/Body (Gray-ish)
-  textInverse: '#000000',   // Text on Primary Button
+  // TYPOGRAPHY
+  textPrimary: '#F1F5F9',    // White - Headings
+  textSecondary: '#94A3B8',  // Gray - Body text
+  textInverse: '#000000',    // Black - On primary button
   
-  // Status
-  danger: '#EF4444',     // Error/Delete
-  success: '#10B981',    // Battery Full/Go
-  warning: '#F59E0B',    // Low Battery
+  // STATUS INDICATORS
+  danger: '#EF4444',         // Red - Error
+  success: '#10B981',        // Green - Battery Full
+  warning: '#F59E0B',        // Amber - Low Battery
   
-  // UI Elements
-  border: '#334155',     // Dividers
-  backdrop: 'rgba(0,0,0,0.8)', // Modal Overlay
-};
+  // UI ELEMENTS
+  border: '#334155',         // Divider lines
+  backdrop: 'rgba(0,0,0,0.8)', // Modal overlay
+}

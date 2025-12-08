@@ -1,5 +1,5 @@
 import React from 'react';
-import { View, Text, StyleSheet, ScrollView } from 'react-native';
+import { View, Text, StyleSheet, ScrollView, Image, TouchableOpacity } from 'react-native';
 import { colors } from '../theme/colors';
 
 const PAST_TRIPS = [
@@ -10,12 +10,16 @@ const PAST_TRIPS = [
 const ProfileScreen = () => {
   return (
     <ScrollView style={styles.container}>
+      {/* Header */}
       <View style={styles.header}>
-        <View style={styles.avatar}><Text style={styles.avatarText}>JD</Text></View>
+        <View style={styles.avatar}>
+          <Text style={styles.avatarText}>JD</Text>
+        </View>
         <Text style={styles.name}>John Doe</Text>
         <View style={styles.tag}><Text style={styles.tagText}>VoltPath Pro</Text></View>
       </View>
 
+      {/* Vehicle Card */}
       <View style={styles.section}>
         <Text style={styles.sectionTitle}>My Vehicle</Text>
         <View style={styles.card}>
@@ -34,6 +38,7 @@ const ProfileScreen = () => {
         </View>
       </View>
 
+      {/* Trip History */}
       <View style={styles.section}>
         <Text style={styles.sectionTitle}>Past Trips</Text>
         {PAST_TRIPS.map(trip => (
@@ -61,6 +66,7 @@ const styles = StyleSheet.create({
   name: { fontSize: 24, fontWeight: 'bold', color: colors.textPrimary },
   tag: { backgroundColor: 'rgba(255, 255, 255, 0.1)', paddingHorizontal: 12, paddingVertical: 4, borderRadius: 12, marginTop: 8 },
   tagText: { color: colors.textSecondary, fontSize: 12, fontWeight: 'bold' },
+  
   section: { padding: 20 },
   sectionTitle: { fontSize: 18, fontWeight: 'bold', color: colors.textPrimary, marginBottom: 12 },
   card: { backgroundColor: colors.surface, borderRadius: 16, padding: 16, borderWidth: 1, borderColor: colors.border },
@@ -71,6 +77,7 @@ const styles = StyleSheet.create({
   statsRow: { flexDirection: 'row', justifyContent: 'space-between' },
   statLabel: { color: colors.textSecondary },
   statValue: { color: colors.primary, fontWeight: 'bold' },
+  
   tripItem: { flexDirection: 'row', justifyContent: 'space-between', padding: 16, backgroundColor: colors.surface, borderRadius: 12, marginBottom: 10, borderWidth: 1, borderColor: colors.border },
   tripRoute: { color: colors.textPrimary, fontWeight: 'bold', fontSize: 16 },
   tripDate: { color: colors.textSecondary, fontSize: 12, marginTop: 4 },

@@ -2,7 +2,7 @@ import React, { useState, useContext } from 'react';
 import { View, Text, TouchableOpacity, StyleSheet, Alert } from 'react-native';
 import { colors } from '../theme/colors';
 import { TABS, SCREENS } from './BottomTabParams';
-import { useTrip } from '../context/TripContext'; // Import the HOOK
+import { useTrip } from '../Hooks/useTrip';
 
 import TripPlannerScreen from '../screens/TripPlannerScreen';
 import RouteExplorerScreen from '../screens/RouteExplorerScreen';

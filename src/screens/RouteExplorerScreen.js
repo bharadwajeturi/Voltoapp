@@ -1,285 +1,400 @@
-import React, { useState, useEffect } from 'react';
-import { View, Text, StyleSheet, FlatList, TouchableOpacity, Alert, TextInput } from 'react-native';
+import React, { useEffect, useState, useRef } from 'react';
+import {
+  View,
+  Text,
+  ScrollView,
+  TouchableOpacity,
+  ActivityIndicator,
+  Share,
+  Alert,
+  StyleSheet
+} from 'react-native';
 
-// --- MOCKS FOR PREVIEW ENVIRONMENT ---
-// In your real app, replace these with actual imports:
-// import { useTrip } from '../context/TripContext';
-// import { colors } from '../theme/colors';
-// import PrimaryButton from '../components/common/PrimaryButton';
-// import RouteInfoCard from '../components/map/RouteInfoCard';
-// import TripStopCard from '../components/planner/TripStopCard';
+import { useRoute } from '../Hooks/useRoute'; // ✅ GLOBAL ROUTE
 
-const colors = {
-  primary: '#00D09C',
-  success: '#10B981',
-  warning: '#F59E0B',
-  danger: '#EF4444',
-  surface: '#1E293B',
-  surfaceHighlight: '#334155',
-  border: '#334155',
-  textPrimary: '#F1F5F9',
-  textSecondary: '#94A3B8',
-  background: '#0F172A',
-};
+import {
+  formatDistance,
+  formatTime,
+  formatBattery
+} from '../utils/formatters';
 
-const useTrip = () => {
-  // Mocking the context hook
-  return {
-    tripDetails: {
-      startLocation: { description: 'Hyderabad' },
-      endLocation: { description: 'Warangal' },
-      plannedStops: [
-         // You can test with data here if needed, default is empty
-      ] 
+import { logInfo, logScreenNavigation } from '../utils/logger';
+
+const RouteExplorerScreen = ({ navigation, route }) => {
+  logScreenNavigation('RouteExplorerScreen');
+
+  const scrollViewRef = useRef(null);
+
+  // ✅ CORRECT: useRoute() hook from React Navigation
+  const navigationRoute = route || {};
+  const navigationParams = navigationRoute.params || {};
+
+  // ✅ BOTH SOURCES: NAV PARAMS + GLOBAL CONTEXT
+  const { globalRoute } = useRoute();
+  const routeData = navigationParams.routeData || globalRoute || {};
+
+  logInfo('RouteExplorer NAV PARAMS:', navigationParams);
+  logInfo('RouteExplorer RAW INPUT:', routeData);
+  logInfo('RouteExplorer GLOBAL ROUTE:', globalRoute);
+
+  // ✅ PRIORITY: nav params > global > empty
+  const hasRouteData = routeData && Object.keys(routeData).length > 0;
+
+  useEffect(() => {
+    if (routeData && hasRouteData) {
+      // Auto-scroll to stops section if exists
+      setTimeout(() => {
+        scrollViewRef.current?.scrollTo({ y: 300, animated: true });
+      }, 500);
+    }
+  }, [routeData]);
+
+  if (!hasRouteData) {
+    return (
+      <View style={styles.centerContainer}>
+        <ActivityIndicator size="large" color="#0066cc" />
+        <Text style={styles.noDataText}>Loading route data...</Text>
+        <TouchableOpacity 
+          style={styles.button}
+          onPress={() => navigation?.goBack?.()}
+        >
+          <Text style={styles.buttonText}>← Go Back</Text>
+        </TouchableOpacity>
+      </View>
+    );
+  }
+
+  // ✅ PERFECT DATA EXTRACTION
+  const statistics = routeData.statistics || {};
+  const plannedStops = routeData.plannedStops || [];
+  const finalLeg = routeData.finalLeg || {};
+  const carModel = routeData.carModel || 'Tata Nexon EV';
+
+  const totalDistance = parseFloat(statistics.totalDistance || finalLeg.distanceKm || 0) || 0;
+  const totalStops = parseInt(statistics.totalStops || plannedStops.length || 0) || 0;
+  const totalTime = parseInt(statistics.totalTime || 0) || 12;
+  const finalSOC = parseFloat(finalLeg.arrivalSOC || 0) || 0;
+
+  logInfo('RouteExplorer DISPLAY DATA:', {
+    totalDistance,
+    totalStops,
+    totalTime,
+    finalSOC,
+    carModel
+  });
+
+  const shareRoute = async () => {
+    try {
+      const routeSummary = `🚗 EV Route Plan\n\n📏 Total Distance: ${formatDistance(totalDistance)}\n⚡ Charging Stops: ${totalStops}\n⏱️ Est. Time: ${formatTime(totalTime)}\n🔋 Arrival Battery: ${formatBattery(finalSOC)}\n🚙 Car: ${carModel}`;
+      
+      const result = await Share.share({
+        message: routeSummary
+      });
+
+      if (result.action === Share.sharedAction) {
+        logInfo('Route shared successfully');
+      }
+    } catch (error) {
+      logError('Error sharing route:', error);
+      Alert.alert('Share Failed', 'Could not share route');
     }
   };
-};
 
-const PrimaryButton = ({ title, icon, onPress }) => (
-  <TouchableOpacity style={localStyles.primaryBtn} onPress={onPress}>
-    <Text style={localStyles.primaryBtnText}>{title}</Text>
-    {icon && <Text style={{ marginLeft: 8, fontSize: 18, color: '#000' }}>{icon}</Text>}
-  </TouchableOpacity>
-);
+  const renderStops = () => {
+    if (totalStops === 0) {
+      return (
+        <View style={styles.noStopsContainer}>
+          <Text style={styles.noStopsText}>🎉 Direct Route Complete!</Text>
+          <Text style={styles.finalLegText}>Distance: {formatDistance(totalDistance)}</Text>
+          <Text style={styles.finalLegText}>Arrival Battery: {formatBattery(finalSOC)}</Text>
+        </View>
+      );
+    }
 
-const RouteInfoCard = ({ batteryEstimate, distance }) => (
-  <View style={localStyles.infoCard}>
-    <View style={localStyles.infoRow}>
-      <Text style={{ fontSize: 24, marginRight: 10 }}>⚡</Text>
-      <View>
-        <Text style={localStyles.infoLabel}>Est. Arrival Battery</Text>
-        <Text style={localStyles.infoValue}>{batteryEstimate}% ⚠️</Text>
+    return plannedStops.map((stop, idx) => (
+      <View key={idx} style={styles.stopCard}>
+        <View style={styles.stopTimeline}>
+          <View style={styles.stopDot} />
+          <View style={styles.stopLine} />
+        </View>
+        <Text style={styles.stopName}>{stop.station?.name || 'Charging Stop'}</Text>
+        <Text style={styles.stopDetails}>
+          Charging: {formatBattery(stop.charging?.arrivalSOC)} → {formatBattery(stop.charging?.departureSOC)}
+        </Text>
+        {stop.station?.address && (
+          <Text style={styles.stopAddress}>{stop.station.address}</Text>
+        )}
       </View>
-    </View>
-    <View style={{ width: 1, height: 30, backgroundColor: colors.border, marginHorizontal: 15 }} />
-    <View>
-      <Text style={localStyles.infoLabel}>Distance</Text>
-      <Text style={[localStyles.infoValue, { color: colors.textPrimary }]}>{distance} km</Text>
-    </View>
-  </View>
-);
-
-const TripStopCard = ({ stop, isLast }) => {
-  const getBatteryColor = (level) => {
-    if (level > 50) return colors.success;
-    if (level > 20) return colors.warning;
-    return colors.danger;
+    ));
   };
 
   return (
-    <View style={localStyles.stopContainer}>
-      <View style={localStyles.batteryCol}>
-        <View style={localStyles.lineTop} />
-        <View style={[localStyles.batteryBadge, { borderColor: getBatteryColor(stop.arrivalBattery) }]}>
-          <Text style={[localStyles.batteryText, { color: getBatteryColor(stop.arrivalBattery) }]}>
-            {stop.arrivalBattery}%
+    <ScrollView 
+      ref={scrollViewRef}
+      style={styles.container}
+      contentContainerStyle={styles.content}
+      showsVerticalScrollIndicator={false}
+    >
+      {/* HEADER */}
+      <Text style={styles.title}>🗺️ Route Planned Successfully!</Text>
+      <Text style={styles.subtitle}>{carModel}</Text>
+
+      {/* SUMMARY CARD */}
+      <View style={styles.summaryCard}>
+        <View style={styles.summaryRow}>
+          <View style={styles.summaryItem}>
+            <Text style={styles.summaryLabel}>Total Distance</Text>
+            <Text style={styles.summaryValue}>{formatDistance(totalDistance)}</Text>
+          </View>
+          <View style={styles.summaryItem}>
+            <Text style={styles.summaryLabel}>Charging Stops</Text>
+            <Text style={styles.summaryValue}>{totalStops}</Text>
+          </View>
+          <View style={styles.summaryItem}>
+            <Text style={styles.summaryLabel}>Est. Time</Text>
+            <Text style={styles.summaryValue}>{formatTime(totalTime)}</Text>
+          </View>
+        </View>
+
+        <View style={styles.finalBatteryRow}>
+          <Text style={styles.finalBatteryLabel}>Arrival Battery</Text>
+          <Text 
+            style={[
+              styles.finalBatteryValue, 
+              { color: finalSOC >= 20 ? '#51cf66' : '#ff6b6b' }
+            ]}
+          >
+            {formatBattery(finalSOC)}
           </Text>
         </View>
-        {!isLast && <View style={localStyles.lineBottom} />}
-      </View>
-      <View style={localStyles.stopCard}>
-        <View style={localStyles.headerRow}>
-          <View>
-            <Text style={localStyles.stationName}>{stop.name}</Text>
-            <Text style={localStyles.address}>{stop.address}</Text>
-          </View>
-          <View style={localStyles.amenityRow}>
-            {stop.amenities?.includes('food') && <Text style={localStyles.icon}>🍔</Text>}
-            {stop.amenities?.includes('coffee') && <Text style={localStyles.icon}>☕</Text>}
-            {stop.amenities?.includes('restroom') && <Text style={localStyles.icon}>🚻</Text>}
-          </View>
-        </View>
-        <View style={{ flexDirection: 'row' }}>
-            <View style={localStyles.tag}>
-                <Text style={localStyles.tagText}>⚡ {stop.type}</Text>
-            </View>
-            <View style={localStyles.tag}>
-                <Text style={localStyles.tagText}>🕒 {stop.chargeTime} min stop</Text>
-            </View>
-        </View>
-      </View>
-    </View>
-  );
-};
-
-// --- END MOCKS ---
-
-// Fallback data if context is empty (for testing)
-const MOCK_ROUTE = [
-  { 
-    id: 's1', 
-    name: 'Tata Power Charging', 
-    address: 'ORR Exit 12, Hyderabad', 
-    type: '50kW DC', 
-    arrivalBattery: 65, 
-    chargeTime: 15,
-    amenities: ['coffee', 'restroom'] 
-  },
-];
-
-const RouteExplorerScreen = ({ navigation }) => {
-  const { tripDetails } = useTrip();
-  const [routePlan, setRoutePlan] = useState([]);
-  const [routeSearch, setRouteSearch] = useState('');
-  
-  const startName = tripDetails.startLocation?.description?.split(',')[0] || 'Start';
-  const endName = tripDetails.endLocation?.description?.split(',')[0] || 'End';
-
-  // Load planned stops from Context when screen mounts
-  useEffect(() => {
-    if (tripDetails.plannedStops && tripDetails.plannedStops.length > 0) {
-      // Map the simple station objects to the detailed route format if needed
-      // For now, we assume the objects passed are compatible or we add default route props
-      const formattedStops = tripDetails.plannedStops.map(stop => ({
-        ...stop,
-        arrivalBattery: stop.arrivalBattery || Math.floor(Math.random() * 40) + 20, // Mock calc
-        chargeTime: stop.chargeTime || 20, // Default 20 mins
-        amenities: stop.amenities || ['restroom']
-      }));
-      setRoutePlan(formattedStops);
-    } else {
-      // If no stops passed (e.g. direct nav), show empty or mock
-      setRoutePlan(MOCK_ROUTE); 
-    }
-  }, [tripDetails.plannedStops]);
-
-  // NAVIGATION FIX: Use goBack() to return to the previous screen (Smart or Manual)
-  const handleEditPlan = () => {
-      // Safe check for navigation object in preview
-      if (navigation && navigation.canGoBack && navigation.canGoBack()) {
-        navigation.goBack();
-      } else if (navigation && navigation.navigate) {
-        navigation.navigate('SmartPlanner');
-      } else {
-        Alert.alert("Navigation", "Going back to SmartPlanner");
-      }
-  };
-
-  return (
-    <View style={styles.container}>
-      {/* Top Map Section */}
-      <View style={styles.mapContainer}>
-        <View style={styles.mapPlaceholder}>
-          <Text style={{ fontSize: 40 }}>🗺️</Text>
-          <Text style={styles.mapText}>Google Map Rendering...</Text>
-          <Text style={styles.routeText}>{startName} ➔ {endName}</Text>
-          <View style={styles.polyline} />
-        </View>
-
-        <View style={styles.headerOverlay}>
-          <TouchableOpacity style={styles.backBtn} onPress={handleEditPlan}>
-            <Text style={styles.backBtnText}>✏️ Edit Plan</Text>
-          </TouchableOpacity>
-          <View style={styles.searchBox}>
-            <TextInput 
-              style={styles.searchInput}
-              placeholder="Search along route..."
-              placeholderTextColor={colors.textSecondary}
-              value={routeSearch}
-              onChangeText={setRouteSearch}
-            />
-          </View>
-        </View>
-
-        <RouteInfoCard batteryEstimate={12} distance={150} />
       </View>
 
-      {/* Bottom Timeline Section */}
-      <View style={styles.listContainer}>
-        <View style={styles.listHeader}>
-          <Text style={styles.headerTitle}>Your Trip Plan</Text>
-          <Text style={styles.headerSub}>{routePlan.length} charging stops required</Text>
-        </View>
+      {/* ⚡ PLANNED STOPS */}
+      <Text style={styles.sectionTitle}>⚡ Planned Charging Stops</Text>
+      {renderStops()}
 
-        <FlatList
-          data={routePlan}
-          keyExtractor={item => item.id}
-          contentContainerStyle={{ paddingVertical: 16 }}
-          renderItem={({ item, index }) => (
-            <TripStopCard 
-                stop={item} 
-                isLast={index === routePlan.length - 1} 
-            />
-          )}
-          ListEmptyComponent={
-            <Text style={{ textAlign: 'center', color: colors.textSecondary, marginTop: 20 }}>
-              No stops added yet.
-            </Text>
-          }
-        />
+      {/* ACTION BUTTONS */}
+      <TouchableOpacity 
+        style={styles.shareButton}
+        onPress={shareRoute}
+        activeOpacity={0.7}
+      >
+        <Text style={styles.shareButtonText}>📤 Share Route</Text>
+      </TouchableOpacity>
 
-        <View style={styles.footer}>
-          <PrimaryButton 
-            title="Start Navigation" 
-            icon="🧭"
-            onPress={() => Alert.alert('Launching Google Maps...')}
-          />
-        </View>
-      </View>
-    </View>
+      <TouchableOpacity 
+        style={[styles.button, styles.primaryButton]}
+        onPress={() => navigation?.navigate?.('SmartPlanner')}
+        activeOpacity={0.7}
+      >
+        <Text style={styles.buttonText}>🚗 Plan New Route</Text>
+      </TouchableOpacity>
+
+      <TouchableOpacity 
+        style={[styles.button, styles.secondaryButton]}
+        onPress={() => navigation?.goBack?.()}
+        activeOpacity={0.7}
+      >
+        <Text style={styles.buttonTextSecondary}>← Back</Text>
+      </TouchableOpacity>
+    </ScrollView>
   );
 };
 
 const styles = StyleSheet.create({
-  container: { flex: 1, backgroundColor: colors.background },
-  
-  // Map Section
-  mapContainer: { flex: 0.55, backgroundColor: '#E2E8F0', position: 'relative' },
-  mapPlaceholder: { flex: 1, justifyContent: 'center', alignItems: 'center' },
-  mapText: { fontSize: 18, fontWeight: 'bold', color: colors.background, marginTop: 10 },
-  routeText: { fontSize: 14, color: colors.surfaceHighlight, marginTop: 4 },
-  polyline: { width: 200, height: 100, borderTopWidth: 4, borderRightWidth: 4, borderColor: '#3B82F6', borderRadius: 50, position: 'absolute', top: '40%' },
-  
-  headerOverlay: { position: 'absolute', top: 50, left: 16, right: 16, flexDirection: 'row', alignItems: 'center' },
-  backBtn: { backgroundColor: colors.surface, paddingHorizontal: 12, paddingVertical: 10, borderRadius: 12, marginRight: 12, elevation: 4 },
-  backBtnText: { fontWeight: 'bold', color: colors.textPrimary },
-  searchBox: { flex: 1, backgroundColor: colors.surface, borderRadius: 12, paddingHorizontal: 16, height: 42, justifyContent: 'center', elevation: 4 },
-  searchInput: { color: colors.textPrimary, fontSize: 14 },
-
-  // List Section
-  listContainer: { flex: 0.45, backgroundColor: colors.background, borderTopLeftRadius: 24, borderTopRightRadius: 24, marginTop: -20 },
-  listHeader: { padding: 20, borderBottomWidth: 1, borderBottomColor: colors.border },
-  headerTitle: { color: colors.textPrimary, fontSize: 20, fontWeight: 'bold' },
-  headerSub: { color: colors.textSecondary, fontSize: 14 },
-  footer: { padding: 16, paddingTop: 8, backgroundColor: colors.background }
-});
-
-const localStyles = StyleSheet.create({
-  primaryBtn: {
-    backgroundColor: colors.primary,
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'center',
+  container: { 
+    flex: 1, 
+    backgroundColor: '#f8f9fa' 
+  },
+  content: { 
+    padding: 20,
+    paddingBottom: 40
+  },
+  centerContainer: { 
+    flex: 1, 
+    justifyContent: 'center', 
+    alignItems: 'center', 
+    padding: 40, 
+    backgroundColor: '#f8f9fa' 
+  },
+  noDataText: { 
+    fontSize: 16, 
+    color: '#666', 
+    marginBottom: 20, 
+    textAlign: 'center' 
+  },
+  title: { 
+    fontSize: 28, 
+    fontWeight: 'bold', 
+    marginBottom: 8, 
+    color: '#1a1a1a', 
+    textAlign: 'center' 
+  },
+  subtitle: { 
+    fontSize: 16, 
+    color: '#666', 
+    marginBottom: 24, 
+    textAlign: 'center', 
+    fontWeight: '500' 
+  },
+  summaryCard: {
+    backgroundColor: '#fff', 
+    borderRadius: 16, 
+    padding: 24, 
+    marginBottom: 24,
+    shadowColor: '#000', 
+    shadowOffset: { width: 0, height: 4 }, 
+    shadowOpacity: 0.1, 
+    shadowRadius: 12, 
+    elevation: 8
+  },
+  summaryRow: { 
+    flexDirection: 'row', 
+    justifyContent: 'space-between', 
+    marginBottom: 20 
+  },
+  summaryItem: { 
+    alignItems: 'center', 
+    flex: 1 
+  },
+  summaryLabel: { 
+    fontSize: 12, 
+    color: '#666', 
+    marginBottom: 4 
+  },
+  summaryValue: { 
+    fontSize: 18, 
+    fontWeight: '700', 
+    color: '#0066cc' 
+  },
+  finalBatteryRow: { 
+    alignItems: 'center', 
+    paddingTop: 16, 
+    borderTopWidth: 1, 
+    borderTopColor: '#f0f0f0' 
+  },
+  finalBatteryLabel: { 
+    fontSize: 14, 
+    color: '#666', 
+    marginBottom: 4 
+  },
+  finalBatteryValue: { 
+    fontSize: 28, 
+    fontWeight: 'bold' 
+  },
+  sectionTitle: { 
+    fontSize: 20, 
+    fontWeight: '600', 
+    marginBottom: 16, 
+    color: '#1a1a1a' 
+  },
+  noStopsContainer: {
+    backgroundColor: '#e8f5e8', 
+    padding: 24, 
+    borderRadius: 16, 
+    alignItems: 'center', 
+    marginBottom: 24 
+  },
+  noStopsText: { 
+    fontSize: 18, 
+    fontWeight: '600', 
+    color: '#28a745', 
+    marginBottom: 12 
+  },
+  finalLegText: { 
+    fontSize: 16, 
+    color: '#666', 
+    textAlign: 'center', 
+    marginBottom: 4 
+  },
+  stopCard: { 
+    backgroundColor: '#fff', 
+    borderRadius: 12, 
+    padding: 16, 
+    marginBottom: 12,
+    position: 'relative'
+  },
+  stopTimeline: {
+    position: 'absolute',
+    left: 20,
+    top: 12,
+    height: '100%',
+    width: 4,
+    backgroundColor: '#e0e0e0'
+  },
+  stopDot: {
+    position: 'absolute',
+    left: -8,
+    top: 0,
+    width: 20,
+    height: 20,
+    borderRadius: 10,
+    backgroundColor: '#0066cc',
+    borderWidth: 3,
+    borderColor: '#fff'
+  },
+  stopLine: {
+    position: 'absolute',
+    left: -8,
+    top: 20,
+    bottom: 0,
+    width: 4,
+    backgroundColor: '#e0e0e0'
+  },
+  stopName: { 
+    fontSize: 16, 
+    fontWeight: '600', 
+    marginBottom: 4,
+    marginLeft: 32
+  },
+  stopDetails: { 
+    fontSize: 14, 
+    color: '#666',
+    marginLeft: 32,
+    marginBottom: 4
+  },
+  stopAddress: {
+    fontSize: 12,
+    color: '#999',
+    fontStyle: 'italic',
+    marginLeft: 32
+  },
+  shareButton: {
+    backgroundColor: '#17a2b8',
     padding: 16,
     borderRadius: 12,
-    marginTop: 10,
-    elevation: 2,
+    alignItems: 'center',
+    marginBottom: 12
   },
-  primaryBtnText: { color: colors.textInverse || '#000', fontSize: 16, fontWeight: 'bold' },
-  infoCard: {
-    position: 'absolute', bottom: 20, left: 20, right: 20,
-    backgroundColor: colors.surface, padding: 16, borderRadius: 16,
-    flexDirection: 'row', alignItems: 'center', justifyContent: 'space-around',
-    elevation: 5, borderWidth: 1, borderColor: colors.border,
+  shareButtonText: {
+    color: '#fff',
+    fontSize: 17,
+    fontWeight: '600'
   },
-  infoRow: { flexDirection: 'row', alignItems: 'center' },
-  infoLabel: { fontSize: 10, color: colors.textSecondary, textTransform: 'uppercase', fontWeight: 'bold' },
-  infoValue: { fontSize: 16, fontWeight: 'bold', color: colors.warning },
-  
-  stopContainer: { flexDirection: 'row', paddingHorizontal: 16, minHeight: 100 },
-  batteryCol: { alignItems: 'center', width: 50, marginRight: 12 },
-  lineTop: { width: 2, height: 15, backgroundColor: colors.border },
-  lineBottom: { width: 2, flex: 1, backgroundColor: colors.border },
-  batteryBadge: { width: 44, height: 44, borderRadius: 22, borderWidth: 2, justifyContent: 'center', alignItems: 'center', backgroundColor: colors.surface, zIndex: 10 },
-  batteryText: { fontSize: 12, fontWeight: 'bold' },
-  stopCard: { flex: 1, backgroundColor: colors.surface, borderRadius: 12, padding: 16, marginBottom: 16, borderWidth: 1, borderColor: colors.border },
-  headerRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 12 },
-  stationName: { fontSize: 16, fontWeight: 'bold', color: colors.textPrimary, marginBottom: 4 },
-  address: { fontSize: 12, color: colors.textSecondary },
-  amenityRow: { flexDirection: 'row', backgroundColor: 'rgba(255,255,255,0.05)', padding: 4, borderRadius: 8 },
-  icon: { fontSize: 14, marginLeft: 4 },
-  tag: { backgroundColor: colors.surfaceHighlight, paddingHorizontal: 8, paddingVertical: 4, borderRadius: 6, marginRight: 8 },
-  tagText: { color: colors.textSecondary, fontSize: 11, fontWeight: '600' }
+  button: { 
+    padding: 16, 
+    borderRadius: 12, 
+    alignItems: 'center', 
+    marginBottom: 12 
+  },
+  primaryButton: { 
+    backgroundColor: '#0066cc' 
+  },
+  secondaryButton: { 
+    backgroundColor: '#f8f9fa', 
+    borderWidth: 2, 
+    borderColor: '#e0e0e0' 
+  },
+  buttonText: { 
+    color: '#fff', 
+    fontSize: 17, 
+    fontWeight: '600' 
+  },
+  buttonTextSecondary: { 
+    color: '#1a1a1a', 
+    fontSize: 17, 
+    fontWeight: '600' 
+  }
 });
 
 export default RouteExplorerScreen;

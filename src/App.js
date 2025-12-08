@@ -1,17 +1,20 @@
 import React from 'react';
-import { StatusBar } from 'react-native';
-import  {TripProvider} from './context/TripContext';
-import AppNavigator from './navigation/AppNavigator';
-import { colors } from './theme/colors';
+import { LogBox } from 'react-native';
+import { NavigationContainer } from '@react-navigation/native';
+import AppNavigator from '../src/navigation/AppNavigator';
+import { TripProvider } from '../src/context/TripContext';
+import { RouteProvider } from '../src/Hooks/useRoute'; // ✅ IMPORT PROVIDER
 
-// This is the main entry point
+LogBox.ignoreLogs(['Non-serializable values']);
+
 export default function App() {
   return (
-    // 1. Wrap the app in the Context Provider so state is global
-    <TripProvider>
-      <StatusBar barStyle="light-content" backgroundColor={colors.background} />
-      {/* 2. Load the Navigator */}
-      <AppNavigator />
-    </TripProvider>
+    <NavigationContainer>
+      <TripProvider>
+        <RouteProvider>  {/* ✅ WRAP APP */}
+          <AppNavigator />
+        </RouteProvider>
+      </TripProvider>
+    </NavigationContainer>
   );
 }
