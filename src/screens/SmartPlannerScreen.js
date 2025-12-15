@@ -1,529 +1,195 @@
-import React, { useState, useEffect, useCallback } from 'react';
-import {
-  View,
-  Text,
-  ScrollView,
-  TouchableOpacity,
-  ActivityIndicator,
-  Alert,
-  TextInput,
-  Switch
+import React, { useState, useEffect } from 'react';
+import { 
+  View, Text, TextInput, TouchableOpacity, StyleSheet, 
+  ActivityIndicator, Switch, ScrollView, Platform, KeyboardAvoidingView, Alert
 } from 'react-native';
-import { Picker } from '@react-native-picker/picker';
+import Slider from '@react-native-community/slider';
+import { Picker } from '@react-native-picker/picker'; 
+import { Ionicons } from '@expo/vector-icons';
+import { useNavigation } from '@react-navigation/native';
+import * as Location from 'expo-location';
 
-// HOOKS
-import { useTrip } from '../context/TripContext';
-import { useLocationTracking } from '../Hooks/useLocationTracking';
-import { useStations } from '../Hooks/useStations';
-import { useRoute } from '../Hooks/useRoute';  // ✅ CORRECT HOOK ONLY
+import { useTheme } from '../theme/ThemeContext';
+import useTripStore from '../store/useTripStore';
+import { api } from '../services/api';
 
-// UTILS
-import {
-  validateBatteryPercentage,
-  validateCarModel
-} from '../utils/validators';
-import {
-  formatDistance,
-  formatBattery,
-  formatTime
-} from '../utils/formatters';
-import {
-  CAR_EFFICIENCY,
-  CAR_BATTERY_SIZE
-} from '../utils/constants';
-import {
-  logInfo,
-  logError,
-  logScreenNavigation
-} from '../utils/logger';
-import BatteryInput from '../components/planner/BatteryInput';
+const CAR_MODELS = [
+  { label: 'Select Car Model', value: '' },
+  { label: 'Tata Nexon EV Prime (30kWh)', value: 'Tata Nexon EV Prime', range: 250 },
+  { label: 'Tata Nexon EV Max (40.5kWh)', value: 'Tata Nexon EV Max', range: 350 },
+  { label: 'MG ZS EV (50kWh)', value: 'MG ZS EV', range: 400 },
+  { label: 'Hyundai Kona Electric', value: 'Hyundai Kona', range: 450 },
+  { label: 'Tata Tiago EV', value: 'Tata Tiago EV', range: 200 },
+];
 
-const SmartPlannerScreen = ({ navigation }) => {
-  logScreenNavigation('SmartPlannerScreen');
+export default function SmartPlannerScreen() {
+  const { theme, isPremium, toggleTheme } = useTheme();
+  const navigation = useNavigation();
+  const { setTripData, setLoading, isLoading } = useTripStore();
 
-  // HOOKS ✅ CORRECT USAGE
-  const {
-    trip,
-    setCurrentLocation,
-    setDestination,
-    setBattery,
-    setCarModel,
-    setMinArrivalBattery,
-    isValidTrip,
-    getTripDistance
-  } = useTrip();
+  const [startAddress, setStartAddress] = useState('');
+  const [endAddress, setEndAddress] = useState('');
+  const [selectedCar, setSelectedCar] = useState('');
+  const [battery, setBattery] = useState(100);
+  const [buffer, setBuffer] = useState(20);
 
-  const {
-    location,
-    error: locationError,
-    isTracking,
-    startTracking,
-    stopTracking
-  } = useLocationTracking((newLocation) => {
-    logInfo(`📍 Location changed: ${newLocation.latitude}, ${newLocation.longitude}`);
-    setCurrentLocation(newLocation);
-  });
-
-  const {
-    stations,
-    loading: stationsLoading,
-    error: stationsError,
-    fetchNearbyStations,
-    stationCount
-  } = useStations();
-
-  const { planRoute, loading: routeLoading, error: routeError } = useRoute();  // ✅ useRoute ONLY
-
-  // LOCAL STATE
-  const [destinationInput, setDestinationInput] = useState('');
-  const [selectedCarModel, setSelectedCarModel] = useState('Tata Nexon EV');
-  const [minBattery, setMinBattery] = useState('20');
-  const [autoTrack, setAutoTrack] = useState(false);
-
-  // ✅ FIXED: Safe tripStats calculation
-  const calculateTripStats = useCallback(() => {
-    const distance = getTripDistance() || 0;
-    
-    // ✅ SAFE CAR MODEL LOOKUP
-    const cleanModel = selectedCarModel.replace(/\s*\(.*?\)$/, '');
-    const possibleModels = [cleanModel, cleanModel.split(' ')[0], 'Tata Nexon EV'];
-    
-    let efficiency = CAR_EFFICIENCY[cleanModel] || CAR_EFFICIENCY['Tata Nexon EV'] || 16.5;
-    let batterySize = CAR_BATTERY_SIZE[cleanModel] || CAR_BATTERY_SIZE['Tata Nexon EV'] || 40.5;
-    
-    const batteryKwh = (trip.currentBattery || 100) / 100 * batterySize;
-    const energyNeeded = distance / efficiency;
-    const canComplete = batteryKwh >= energyNeeded + 5; // 5kWh minimum reserve
-
-    logInfo('📊 SmartPlanner Stats:', {
-      distance,
-      cleanModel,
-      efficiency,
-      batteryKwh: batteryKwh.toFixed(1),
-      energyNeeded: energyNeeded.toFixed(1),
-      canComplete
-    });
-
-    return {
-      distance,
-      batteryNeeded: energyNeeded,
-      batteryAvailable: batteryKwh,
-      canComplete
-    };
-  }, [trip.currentBattery, selectedCarModel, getTripDistance]);
-
-  const tripStats = calculateTripStats();
-
-  // EFFECTS
   useEffect(() => {
-    if (!isTracking && !trip.currentLocation) {
-      handleStartTracking();
-    }
+    (async () => {
+      let { status } = await Location.requestForegroundPermissionsAsync();
+      if (status === 'granted') {
+        try {
+            let loc = await Location.getCurrentPositionAsync({});
+            // Reverse geocode to get initial address text
+            const [address] = await Location.reverseGeocodeAsync({
+                latitude: loc.coords.latitude,
+                longitude: loc.coords.longitude
+            });
+            if (address) {
+                const addrText = `${address.city || ''}, ${address.region || ''}`;
+                setStartAddress(addrText.replace(/^, /, '')); // Clean up
+            } else {
+                setStartAddress(`${loc.coords.latitude}, ${loc.coords.longitude}`);
+            }
+        } catch (e) {
+            console.log("GPS Error", e);
+        }
+      }
+    })();
   }, []);
 
-  useEffect(() => {
-    if (trip.currentLocation) {
-      fetchNearbyStations(
-        trip.currentLocation.latitude,
-        trip.currentLocation.longitude,
-        50,
-        null
-      );
-    }
-  }, [trip.currentLocation]);
-
-  // HANDLERS
-  const handleStartTracking = useCallback(async () => {
+  const geocodeAddress = async (address) => {
     try {
-      logInfo('Starting location tracking...');
-      await startTracking();
-      setAutoTrack(true);
-    } catch (err) {
-      logError('Failed to start tracking', err);
-      Alert.alert('Location Error', 'Could not access your location');
+        const result = await Location.geocodeAsync(address);
+        if (result && result.length > 0) {
+            return { latitude: result[0].latitude, longitude: result[0].longitude };
+        }
+    } catch (e) {
+        console.error("Geocoding failed for:", address, e);
     }
-  }, [startTracking]);
+    return null;
+  };
 
-  const handleStopTracking = useCallback(() => {
-    stopTracking();
-    setAutoTrack(false);
-    logInfo('Location tracking stopped');
-  }, [stopTracking]);
-
-  const handleCarModelChange = useCallback((model) => {
-    const cleanModel = model.replace(/\s*\(.*?\)$/, '');
-    setSelectedCarModel(model);
-    setCarModel(cleanModel);
-    logInfo('🚗 Car model changed:', cleanModel);
-  }, [setCarModel]);
-
-  const handleMinBatteryChange = useCallback((value) => {
-    const numValue = parseFloat(value);
-    if (!isNaN(numValue) && numValue >= 0 && numValue <= 100) {
-      setMinBattery(value);
-      setMinArrivalBattery(numValue);
+  const handlePlanTrip = async () => {
+    if (!endAddress || !selectedCar) {
+      Alert.alert("Missing Info", "Please enter a destination and select a car model.");
+      return;
     }
-  }, [setMinBattery, setMinArrivalBattery]);
 
-  // ✅ FIXED: SAFE planRoute with validation
-  const handlePlanRoute = useCallback(async () => {
+    setLoading(true);
     try {
-      // ✅ VALIDATION FIRST
-      if (!trip.currentLocation) {
-        Alert.alert('Error', 'Current location not available');
-        return;
+      // 1. Geocode Start (if user changed it) and End
+      let startCoords = await geocodeAddress(startAddress);
+      let endCoords = await geocodeAddress(endAddress);
+
+      // Fallback if geocoding fails (e.g. invalid name)
+      if (!startCoords) {
+         // Try getting current location again if start input failed
+         let loc = await Location.getCurrentPositionAsync({});
+         startCoords = loc.coords;
       }
-      if (!trip.destination) {
-        Alert.alert('Error', 'Please set a destination first');
-        return;
-      }
-
-      logInfo('🚗 PLAN ROUTE:', { 
-        carModel: selectedCarModel,
-        start: trip.currentLocation,
-        end: trip.destination 
-      });
-      
-      const route = await planRoute({
-        start: trip.currentLocation,
-        end: trip.destination,
-        currentBattery: trip.currentBattery,
-        minArrivalBattery: trip.minArrivalBattery,
-        carModel: selectedCarModel.replace(/\s*\(.*?\)$/, ''),
-        skipVerification: true
-      });
-
-      // ✅ SAFE ROUTE LOGGING
-      logInfo('✅ Route planned:', {
-        hasRoute: !!route,
-        plannedStops: route?.plannedStops?.length || 0,
-        totalDistance: route?.statistics?.totalDistance || 0,
-        finalSOC: route?.finalSOC || 'N/A'
-      });
-
-      navigation.navigate('RouteExplorer', { routeData: route });
-    } catch (err) {
-      logError('Route planning failed:', err);
-      Alert.alert('Route Planning Failed', err.message || 'Please try again');
-    }
-  }, [trip.currentLocation, trip.destination, trip.currentBattery, trip.minArrivalBattery, selectedCarModel, planRoute, navigation]);
-
-  const handleSetDestination = useCallback(async () => {
-    try {
-      if (!destinationInput.trim()) {
-        Alert.alert('Invalid Input', 'Please enter a destination');
-        return;
-      }
-      if (!trip.currentLocation) {
-        Alert.alert('Error', 'Current location not available. Enable location first.');
-        return;
+      if (!endCoords) {
+          throw new Error("Could not find destination. Please try a different city name.");
       }
 
-      // Mock destination for demo (real app would geocode)
-      const mockDestination = {
-        latitude: trip.currentLocation.latitude + (Math.random() - 0.5) * 0.5,
-        longitude: trip.currentLocation.longitude + (Math.random() - 0.5) * 0.5,
-        address: destinationInput
+      const carInfo = CAR_MODELS.find(c => c.value === selectedCar);
+
+      const payload = {
+        start: startCoords,
+        end: endCoords, 
+        carModel: selectedCar,
+        maxRangeKm: carInfo?.range || 300,
+        currentBattery: battery,
+        minBuffer: buffer
       };
 
-      const success = setDestination(mockDestination);
-      if (success) {
-        logInfo(`✅ Destination set: ${destinationInput}`);
-        setDestinationInput('');
-      }
-    } catch (err) {
-      logError('Error setting destination', err);
+      const data = await api.planTrip(payload);
+      setTripData(data);
+      
+      navigation.navigate('TripDashboard', { screen: 'RoutePlanner' });
+
+    } catch (error) {
+      console.error("Planning Failed:", error);
+      Alert.alert("Planning Failed", error.message || "Server might be offline.");
+    } finally {
+      setLoading(false);
     }
-  }, [destinationInput, trip.currentLocation, setDestination]);
+  };
 
   return (
-    <ScrollView style={styles.container}>
-      <View style={styles.content}>
-        {/* HEADER */}
-        <Text style={styles.headerTitle}>🧭 Smart Trip Planner</Text>
-        <Text style={styles.headerSubtitle}>Plan your EV journey intelligently</Text>
+    <KeyboardAvoidingView behavior={Platform.OS === "ios" ? "padding" : "height"} style={{ flex: 1 }}>
+      <ScrollView style={[styles.container, { backgroundColor: theme.background }]}>
+        <View style={styles.header}>
+          <Text style={[styles.title, { color: theme.text }]}>Smart Planner</Text>
+          <View style={styles.toggleRow}>
+             <Text style={[styles.modeText, {color: theme.textSecondary}]}>{isPremium ? 'Premium' : 'Eco'}</Text>
+             <Switch value={isPremium} onValueChange={toggleTheme} trackColor={{ false: '#ccc', true: theme.primary }} />
+          </View>
+        </View>
 
-        {/* ERRORS */}
-        {locationError && (
-          <View style={styles.errorBox}>
-            <Text style={styles.errorText}>❌ Location: {locationError}</Text>
-          </View>
-        )}
-        {stationsError && !stationsError.includes('Demo') && (
-          <View style={styles.errorBox}>
-            <Text style={styles.errorText}>❌ Stations: {stationsError}</Text>
-          </View>
-        )}
-        {routeError && (
-          <View style={styles.errorBox}>
-            <Text style={styles.errorText}>❌ Route: {routeError}</Text>
-          </View>
-        )}
-
-        {/* LOCATION */}
-        <View style={styles.section}>
-          <View style={styles.sectionHeader}>
-            <Text style={styles.sectionTitle}>📍 Current Location</Text>
-            <Switch
-              value={autoTrack}
-              onValueChange={(val) => val ? handleStartTracking() : handleStopTracking()}
+        <View style={[styles.card, theme.cardStyle, { backgroundColor: theme.surface }]}>
+          <View style={styles.inputContainer}>
+            <Ionicons name="navigate" size={20} color={theme.primary} />
+            <TextInput 
+              style={[styles.input, { color: theme.text }]} value={startAddress} onChangeText={setStartAddress}
+              placeholder="Start Location (City)" placeholderTextColor={theme.textSecondary}
             />
           </View>
-          {trip.currentLocation ? (
-            <View style={styles.locationBox}>
-              <Text style={styles.locationText}>
-                📌 {trip.currentLocation.latitude.toFixed(4)}, {trip.currentLocation.longitude.toFixed(4)}
-              </Text>
-              <Text style={styles.accuracyText}>
-                Accuracy: ±{Math.round(location?.accuracy || 0)}m
-              </Text>
-              <Text style={[styles.statusText, { color: isTracking ? '#dc3545' : '#999' }]}>
-                {isTracking ? '🔴 Live Tracking' : '⚪ Not Tracking'}
-              </Text>
-            </View>
-          ) : (
-            <ActivityIndicator size="large" color="#0066cc" />
-          )}
-          <TouchableOpacity 
-            style={[styles.button, { backgroundColor: isTracking ? '#dc3545' : '#0066cc' }]}
-            onPress={isTracking ? handleStopTracking : handleStartTracking}
-          >
-            <Text style={styles.buttonText}>
-              {isTracking ? '⏹ Stop Tracking' : '▶ Start Tracking'}
-            </Text>
-          </TouchableOpacity>
-        </View>
-
-        {/* DESTINATION */}
-        <View style={styles.section}>
-          <Text style={styles.sectionTitle}>🎯 Destination</Text>
-          <View style={styles.inputGroup}>
-            <TextInput
-              style={styles.input}
-              placeholder="Enter destination address or coordinates"
-              value={destinationInput}
-              onChangeText={setDestinationInput}
-              placeholderTextColor="#999"
+          <View style={{ marginLeft: 20, height: 20, borderLeftWidth: 1, borderLeftColor: theme.border }} />
+          <View style={styles.inputContainer}>
+            <Ionicons name="location" size={20} color={theme.accent} />
+            <TextInput 
+              style={[styles.input, { color: theme.text }]} value={endAddress} onChangeText={setEndAddress}
+              placeholder="Enter Destination (City)" placeholderTextColor={theme.textSecondary}
             />
-            <TouchableOpacity style={styles.inputButton} onPress={handleSetDestination}>
-              <Text style={styles.inputButtonText}>Set</Text>
-            </TouchableOpacity>
           </View>
-          {trip.destination && (
-            <View style={styles.destinationBox}>
-              <Text style={styles.destinationText}>
-                ✓ {trip.destination.address || 'Set'}
-              </Text>
-              <Text style={styles.distanceText}>
-                Distance: {formatDistance(getTripDistance() || 0)}
-              </Text>
+        </View>
+
+        <Text style={[styles.sectionLabel, { color: theme.textSecondary }]}>VEHICLE</Text>
+        <View style={[styles.card, theme.cardStyle, { backgroundColor: theme.surface, padding: 0 }]}>
+          <Picker selectedValue={selectedCar} onValueChange={(itemValue) => setSelectedCar(itemValue)} style={{ color: theme.text }} dropdownIconColor={theme.text}>
+            {CAR_MODELS.map((car) => (<Picker.Item key={car.value} label={car.label} value={car.value} />))}
+          </Picker>
+        </View>
+
+        <Text style={[styles.sectionLabel, { color: theme.textSecondary }]}>BATTERY STATUS</Text>
+        <View style={[styles.card, theme.cardStyle, { backgroundColor: theme.surface }]}>
+          <View style={styles.sliderGroup}>
+            <View style={styles.row}>
+              <Text style={{ color: theme.text }}>Current Charge</Text>
+              <Text style={{ color: theme.primary, fontWeight: 'bold' }}>{Math.round(battery)}%</Text>
             </View>
-          )}
-        </View>
-
-        {/* CAR MODEL */}
-        <View style={styles.section}>
-          <Text style={styles.sectionTitle}>🚗 Car Model</Text>
-          <View style={styles.pickerContainer}>
-            <Picker
-              selectedValue={selectedCarModel}
-              onValueChange={handleCarModelChange}
-              style={styles.picker}
-            >
-              <Picker.Item label="Tata Nexon EV (437km)" value="Tata Nexon EV" />
-              <Picker.Item label="MG ZS EV (461km)" value="MG ZS EV" />
-              <Picker.Item label="Hyundai Kona Electric (452km)" value="Hyundai Kona Electric" />
-              <Picker.Item label="Mahindra XUV400 (456km)" value="Mahindra XUV400" />
-              <Picker.Item label="BMW i4 (590km)" value="BMW i4" />
-            </Picker>
+            <Slider style={{ width: '100%', height: 40 }} minimumValue={10} maximumValue={100} minimumTrackTintColor={theme.primary} thumbTintColor={theme.primary} value={battery} onValueChange={setBattery} />
           </View>
-          <Text style={styles.infoText}>
-            Efficiency: {CAR_EFFICIENCY[selectedCarModel] || 16.5} km/kWh | Battery: {CAR_BATTERY_SIZE[selectedCarModel] || 40.5} kWh
-          </Text>
-        </View>
-
-        {/* BATTERY */}
-        <View style={styles.section}>
-          <Text style={styles.sectionTitle}>🔋 Current Battery</Text>
-          <BatteryInput
-            value={trip.currentBattery}
-            onChange={setBattery}
-            label="Current Battery Level"
-          />
-        </View>
-
-        {/* MIN ARRIVAL */}
-        <View style={styles.section}>
-          <Text style={styles.sectionTitle}>🛑 Min Arrival Battery</Text>
-          <TextInput
-            style={styles.input}
-            placeholder="Minimum battery at destination (%)"
-            value={minBattery}
-            onChangeText={handleMinBatteryChange}
-            keyboardType="decimal-pad"
-            placeholderTextColor="#999"
-          />
-        </View>
-
-        {/* STATIONS */}
-        {stationCount > 0 && (
-          <View style={styles.section}>
-            <Text style={styles.sectionTitle}>⚡ Nearby Stations ({stationCount})</Text>
-            {stations.slice(0, 3).map((station, idx) => (
-              <View key={idx} style={styles.stationItem}>
-                <Text style={styles.stationName}>{station.name}</Text>
-                <Text style={styles.stationDistance}>
-                  {formatDistance(station.distance)} away
-                </Text>
-              </View>
-            ))}
-          </View>
-        )}
-
-        {/* STATS */}
-        <View style={styles.statsSection}>
-          <Text style={styles.statLabel}>📊 Trip Analysis</Text>
-          <View style={styles.statRow}>
-            <Text>Distance</Text>
-            <Text style={styles.statValue}>{formatDistance(tripStats.distance)}</Text>
-          </View>
-          <View style={styles.statRow}>
-            <Text>Battery Needed</Text>
-            <Text style={styles.statValue}>
-              {tripStats.batteryNeeded.toFixed(1)} kWh
-            </Text>
-          </View>
-          <View style={styles.statRow}>
-            <Text>Battery Available</Text>
-            <Text style={styles.statValue}>
-              {tripStats.batteryAvailable.toFixed(1)} kWh
-            </Text>
-          </View>
-          <View style={[styles.statRow, { borderTopWidth: 2, borderTopColor: '#0066cc', paddingTop: 12 }]}>
-            <Text style={styles.statLabel}>Can Complete</Text>
-            <Text style={{ 
-              color: tripStats.canComplete ? '#28a745' : '#dc3545', 
-              fontWeight: 'bold', 
-              fontSize: 18 
-            }}>
-              {tripStats.canComplete ? '✓ YES' : '✗ NO'}
-            </Text>
+          <View style={styles.sliderGroup}>
+            <View style={styles.row}>
+              <Text style={{ color: theme.text }}>Min Arrival Buffer</Text>
+              <Text style={{ color: theme.accent, fontWeight: 'bold' }}>{Math.round(buffer)}%</Text>
+            </View>
+            <Slider style={{ width: '100%', height: 40 }} minimumValue={5} maximumValue={50} minimumTrackTintColor={theme.accent} thumbTintColor={theme.accent} value={buffer} onValueChange={setBuffer} />
           </View>
         </View>
 
-        {/* BUTTONS */}
-        <TouchableOpacity
-          style={[
-            styles.button, 
-            styles.primaryButton, 
-            (routeLoading || !isValidTrip()) && styles.disabledButton
-          ]}
-          onPress={handlePlanRoute}
-          disabled={routeLoading || !isValidTrip()}
-        >
-          <Text style={[
-            styles.buttonText,
-            (routeLoading || !isValidTrip()) && { color: '#ccc' }
-          ]}>
-            {routeLoading ? '⏳ Planning...' : '🗺 Plan Route'}
-          </Text>
+        <TouchableOpacity style={[styles.planButton, { backgroundColor: theme.primary, shadowColor: theme.shadow }]} onPress={handlePlanTrip} disabled={isLoading}>
+          {isLoading ? <ActivityIndicator color="#fff" /> : <Text style={styles.btnText}>PLAN TRIP ⚡</Text>}
         </TouchableOpacity>
-
-        <TouchableOpacity
-          style={[styles.button, styles.secondaryButton]}
-          onPress={() => navigation.navigate('TripPlanner')}
-        >
-          <Text style={styles.buttonTextSecondary}>📋 Manual Trip Planner</Text>
-        </TouchableOpacity>
-      </View>
-    </ScrollView>
+        <View style={{height: 50}} /> 
+      </ScrollView>
+    </KeyboardAvoidingView>
   );
-};
+}
 
-const styles = {
-  container: { flex: 1, backgroundColor: '#f8f9fa' },
-  content: { padding: 16 },
-  headerTitle: { fontSize: 24, fontWeight: 'bold', marginBottom: 4, color: '#000' },
-  headerSubtitle: { fontSize: 14, color: '#666', marginBottom: 16 },
-  errorBox: {
-    backgroundColor: '#fee', padding: 12, borderRadius: 8, marginBottom: 12,
-    borderLeftWidth: 4, borderLeftColor: '#dc3545'
-  },
-  errorText: { color: '#c00', fontSize: 13 },
-  section: {
-    backgroundColor: '#fff', padding: 16, borderRadius: 8, marginBottom: 12,
-    borderWidth: 1, borderColor: '#eee'
-  },
-  sectionHeader: { 
-    flexDirection: 'row', 
-    justifyContent: 'space-between', 
-    alignItems: 'center', 
-    marginBottom: 12 
-  },
-  sectionTitle: { fontSize: 16, fontWeight: '600', color: '#000', marginBottom: 12 },
-  locationBox: { backgroundColor: '#f0f8ff', padding: 12, borderRadius: 6, marginBottom: 12 },
-  locationText: { fontSize: 14, fontWeight: '500', color: '#0066cc', marginBottom: 4 },
-  accuracyText: { fontSize: 12, color: '#666', marginBottom: 4 },
-  statusText: { fontSize: 13, fontWeight: '500' },
-  inputGroup: { flexDirection: 'row', marginBottom: 12 },
-  input: {
-    flex: 1, 
-    borderWidth: 1, 
-    borderColor: '#ddd', 
-    borderRadius: 6,
-    paddingHorizontal: 12, 
-    paddingVertical: 10, 
-    fontSize: 14, 
-    marginBottom: 8,
-    backgroundColor: '#fff'
-  },
-  inputButton: {
-    backgroundColor: '#0066cc', 
-    paddingHorizontal: 16, 
-    paddingVertical: 10,
-    borderRadius: 6, 
-    marginLeft: 8, 
-    justifyContent: 'center'
-  },
-  inputButtonText: { color: '#fff', fontWeight: '600', fontSize: 14 },
-  destinationBox: { backgroundColor: '#f0f8ff', padding: 12, borderRadius: 6 },
-  destinationText: { fontSize: 14, fontWeight: '500', color: '#0066cc', marginBottom: 4 },
-  distanceText: { fontSize: 13, color: '#666' },
-  pickerContainer: {
-    borderWidth: 1, 
-    borderColor: '#ddd', 
-    borderRadius: 6, 
-    overflow: 'hidden', 
-    marginBottom: 12
-  },
-  picker: { height: 50 },
-  infoText: { fontSize: 12, color: '#666', fontStyle: 'italic' },
-  stationItem: { paddingVertical: 8, borderBottomWidth: 1, borderBottomColor: '#eee' },
-  stationName: { fontSize: 14, fontWeight: '500', color: '#000' },
-  stationDistance: { fontSize: 12, color: '#666' },
-  statsSection: {
-    backgroundColor: '#fff', 
-    padding: 16, 
-    borderRadius: 8, 
-    marginBottom: 12,
-    borderWidth: 1, 
-    borderColor: '#eee'
-  },
-  statLabel: { fontSize: 16, fontWeight: '600', marginBottom: 12, color: '#000' },
-  statRow: {
-    flexDirection: 'row', 
-    justifyContent: 'space-between', 
-    paddingVertical: 8,
-    borderBottomWidth: 1, 
-    borderBottomColor: '#eee'
-  },
-  statValue: { fontWeight: '600', color: '#0066cc' },
-  button: { padding: 14, borderRadius: 8, alignItems: 'center', marginBottom: 12 },
-  primaryButton: { backgroundColor: '#0066cc' },
-  secondaryButton: { backgroundColor: '#e0e0e0' },
-  disabledButton: { backgroundColor: '#6c757d' },
-  buttonText: { color: '#fff', fontSize: 16, fontWeight: '600' },
-  buttonTextSecondary: { color: '#000', fontSize: 16, fontWeight: '600' }
-};
-
-export default SmartPlannerScreen;
+const styles = StyleSheet.create({
+  container: { flex: 1, padding: 20 },
+  header: { marginTop: 50, marginBottom: 20, flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' },
+  title: { fontSize: 32, fontWeight: 'bold' },
+  toggleRow: { flexDirection: 'row', alignItems: 'center' },
+  modeText: { marginRight: 10, fontSize: 12 },
+  card: { padding: 15, marginBottom: 20 },
+  inputContainer: { flexDirection: 'row', alignItems: 'center' },
+  input: { flex: 1, marginLeft: 10, fontSize: 16, height: 40 },
+  sectionLabel: { fontSize: 12, fontWeight: 'bold', marginBottom: 10, marginLeft: 5 },
+  sliderGroup: { marginBottom: 15 },
+  row: { flexDirection: 'row', justifyContent: 'space-between', marginBottom: 5 },
+  planButton: { height: 60, borderRadius: 16, justifyContent: 'center', alignItems: 'center', elevation: 8, shadowOffset: {width: 0, height: 4}, shadowOpacity: 0.3 },
+  btnText: { color: '#fff', fontSize: 18, fontWeight: 'bold', letterSpacing: 1 }
+});

@@ -95,3 +95,58 @@ To learn more about React Native, take a look at the following resources:
 - [Learn the Basics](https://reactnative.dev/docs/getting-started) - a **guided tour** of the React Native **basics**.
 - [Blog](https://reactnative.dev/blog) - read the latest official React Native **Blog** posts.
 - [`@facebook/react-native`](https://github.com/facebook/react-native) - the Open Source; GitHub **repository** for React Native.
+
+
+F:\React\voltpath\VoltPathMobile\src\components\common\PremiumBadge.js
+F:\React\voltpath\VoltPathMobile\src\components\common\PrimaryButton.js
+F:\React\voltpath\VoltPathMobile\src\components\common\StationCard.js
+F:\React\voltpath\VoltPathMobile\src\components\map\RouteInfoCard.js
+F:\React\voltpath\VoltPathMobile\src\components\planner\BatteryInput.js
+F:\React\voltpath\VoltPathMobile\src\components\planner\BatteryInput.js
+F:\React\voltpath\VoltPathMobile\src\components\planner\BatterySlider.js
+F:\React\voltpath\VoltPathMobile\src\components\planner\CarSelector.js
+F:\React\voltpath\VoltPathMobile\src\components\planner\TripStopCard.js
+F:\React\voltpath\VoltPathMobile\src\config\mapsConfig.js
+F:\React\voltpath\VoltPathMobile\src\constants\carModels.js
+F:\React\voltpath\VoltPathMobile\src\constants\carModels.js
+F:\React\voltpath\VoltPathMobile\src\context\TripContext.js
+F:\React\voltpath\VoltPathMobile\src\Hooks\useLocationTracking.js
+F:\React\voltpath\VoltPathMobile\src\Hooks\useRoute.js
+F:\React\voltpath\VoltPathMobile\src\Hooks\useStations.js
+F:\React\voltpath\VoltPathMobile\src\Hooks\usetrip.js
+F:\React\voltpath\VoltPathMobile\src\navigation\AppNavigator.js
+F:\React\voltpath\VoltPathMobile\src\navigation\BottomTabParams.js
+F:\React\voltpath\VoltPathMobile\src\screens\EmergencyScreen.js
+F:\React\voltpath\VoltPathMobile\src\screens\MapScreen.js
+F:\React\voltpath\VoltPathMobile\src\screens\NearMeScreen.js
+F:\React\voltpath\VoltPathMobile\src\screens\ProfileScreen.js
+F:\React\voltpath\VoltPathMobile\src\screens\RouteExplorerScreen.js
+F:\React\voltpath\VoltPathMobile\src\screens\SmartPlannerScreen.js
+F:\React\voltpath\VoltPathMobile\src\screens\TripPlannerScreen.js
+F:\React\voltpath\VoltPathMobile\src\services\api.js
+F:\React\voltpath\VoltPathMobile\src\services\geocoding.js
+F:\React\voltpath\VoltPathMobile\src\theme\colors.js
+F:\React\voltpath\VoltPathMobile\src\utils\calculations.js
+F:\React\voltpath\VoltPathMobile\src\utils\constants.js
+F:\React\voltpath\VoltPathMobile\src\utils\debounce.js
+F:\React\voltpath\VoltPathMobile\src\utils\formatters.js
+F:\React\voltpath\VoltPathMobile\src\utils\logger.js
+F:\React\voltpath\VoltPathMobile\src\utils\permissions.js
+F:\React\voltpath\VoltPathMobile\src\utils\storage.js
+F:\React\voltpath\VoltPathMobile\src\utils\validators.js
+F:\React\voltpath\VoltPathMobile\src\App.js
+F:\React\voltpath\VoltPathMobile\index.js
+
+
+"@react-native-async-storage/async-storage": "2.2.0",
+    "@react-native-community/slider": "5.0.1",
+    "@react-navigation/bottom-tabs": "^7.8.12",
+    "@react-navigation/native": "^7.1.25",
+    "@react-navigation/stack": "^7.6.12",
+    "react": "19.1.0",
+    "react-native": "0.81.5",
+    "react-native-gesture-handler": "~2.28.0",
+    "react-native-maps": "1.20.1",
+    "react-native-reanimated": "~4.1.1",
+    "react-native-safe-area-context": "~5.6.0",
+    "react-native-screens": "~4.16.0",

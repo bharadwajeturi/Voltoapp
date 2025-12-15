@@ -1,575 +1,160 @@
-// Screens/NearMeScreen.js
-// Near me screen with nearby charging stations - FIXED!
-
-import React, { useEffect, useState, useCallback } from 'react';
-import {
-  View,
-  Text,
-  FlatList,
-  TouchableOpacity,
-  Linking,
-  StyleSheet,
-  ActivityIndicator,
-  Alert,
-  RefreshControl
+import React, { useState, useEffect, useCallback, memo } from 'react';
+import { 
+  View, Text, StyleSheet, FlatList, TouchableOpacity, ActivityIndicator, TextInput, Dimensions
 } from 'react-native';
+import MapView, { Marker, PROVIDER_GOOGLE } from 'react-native-maps';
+import * as Location from 'expo-location';
+import Slider from '@react-native-community/slider';
+import { Ionicons } from '@expo/vector-icons';
 
-// ============================================
-// HOOKS IMPORTS
-// ============================================
-import { useStations } from '../Hooks/useStations';
-import { useLocationTracking } from '../Hooks/useLocationTracking';
-import { useTrip } from '../context/TripContext';  // ✅ ADDED TRIP CONTEXT
+import { useTheme } from '../theme/ThemeContext';
+import { api } from '../services/api';
 
-// ============================================
-// COMPONENTS IMPORTS
-// ============================================
-import StationCard from '../components/common/StationCard';
+const { width, height } = Dimensions.get('window');
 
-// ============================================
-// UTILS IMPORTS
-// ============================================
-import {
-  logInfo,
-  logError,
-  logScreenNavigation,
-  logWarn
-} from '../utils/logger';
-import { formatDistance } from '../utils/formatters';
-
-const NearMeScreen = ({ navigation }) => {
-  logScreenNavigation('NearMeScreen');
-
-  // ============================================
-  // HOOKS
-  // ============================================
-  const { location, error: locationError, startTracking } = useLocationTracking();
-  const {
-    stations,
-    loading: stationsLoading,
-    error: stationsError,
-    fetchNearbyStations,
-    stationCount
-  } = useStations();
-
-  // ✅ FIXED: Trip context to avoid undefined plannedStops
-  const {
-    setCurrentLocation,
-    setBattery,
-    setMinArrivalBattery,
-    setCarModel
-  } = useTrip();
-
-  // ============================================
-  // LOCAL STATE
-  // ============================================
-  const [isRefreshing, setIsRefreshing] = useState(false);
-  const [selectedRadius, setSelectedRadius] = useState(30);
-
-  // ============================================
-  // EFFECTS
-  // ============================================
-  useEffect(() => {
-    initializeLocationAndFetchStations();
-  }, []);
-
-  // ============================================
-  // HANDLERS
-  // ============================================
-  const initializeLocationAndFetchStations = useCallback(async () => {
-    try {
-      logInfo('🔴 Starting location tracking for NearMe screen...');
-      await startTracking();
-      
-      if (location) {
-        await handleFetchStations();
-      }
-    } catch (err) {
-      logError('Failed to initialize location', err);
-      Alert.alert('Location Error', 'Could not access your location');
-    }
-  }, [location]);
-
-  const handleFetchStations = useCallback(async () => {
-    try {
-      if (!location) {
-        logWarn('⚠ Location not available');
-        Alert.alert('Error', 'Unable to determine your location');
-        return;
-      }
-
-      logInfo(`📍 Fetching stations near ${location.latitude.toFixed(4)}, ${location.longitude.toFixed(4)} (${selectedRadius}km)`);
-      
-      await fetchNearbyStations(
-        location.latitude,
-        location.longitude,
-        selectedRadius,
-        null
-      );
-
-      logInfo(`✓ Found ${stationCount} nearby stations`);
-    } catch (err) {
-      logError('Error fetching nearby stations', err);
-    }
-  }, [location, selectedRadius, fetchNearbyStations, stationCount]);
-
-  const handleRefresh = useCallback(async () => {
-    try {
-      setIsRefreshing(true);
-      await handleFetchStations();
-    } catch (err) {
-      logError('Refresh failed', err);
-    } finally {
-      setIsRefreshing(false);
-    }
-  }, [handleFetchStations]);
-
-  const handleRadiusChange = useCallback((radius) => {
-    logInfo(`Changing search radius to ${radius}km`);
-    setSelectedRadius(radius);
-  }, []);
-
-  // ✅ FIXED: Safe navigation to SmartPlanner
-  const handleSmartPlanner = useCallback(() => {
-    try {
-      // ✅ Initialize SAFE trip data - NO undefined plannedStops
-      if (location) {
-        setCurrentLocation(location);
-        setBattery(80);  // Default 80%
-        setMinArrivalBattery(20);  // Default 20%
-        setCarModel('Tata Nexon EV');  // Default car
-      }
-      
-      logInfo('✅ Navigated to SmartPlanner with safe trip data');
-      navigation.navigate('SmartPlanner');
-    } catch (err) {
-      logError('SmartPlanner navigation error:', err);
-    }
-  }, [location, setCurrentLocation, setBattery, setMinArrivalBattery, setCarModel, navigation]);
-
-  // ============================================
-  // GOOGLE MAPS INTEGRATION (Requirement 11)
-  // ============================================
-  const openLocationInMaps = useCallback((station) => {
-    try {
-      const googleMapsUrl = `https://www.google.com/maps/search/${station.lat || station.latitude},${station.lng || station.longitude}`;
-      logInfo(`🗺️ Opening station in Google Maps: ${station.name}`);
-      Linking.openURL(googleMapsUrl).catch((err) => {
-        logError('Failed to open Google Maps', err);
-        Alert.alert('Error', 'Could not open Google Maps');
-      });
-    } catch (err) {
-      logError('Error opening maps', err);
-    }
-  }, []);
-
-  const openDirections = useCallback((station) => {
-    try {
-      const directionsUrl = `https://www.google.com/maps/dir/?api=1&destination=${station.lat || station.latitude},${station.lng || station.longitude}&dir_action=navigate`;
-      logInfo(`🧭 Opening directions to ${station.name}`);
-      Linking.openURL(directionsUrl).catch((err) => {
-        logError('Failed to open directions', err);
-        Alert.alert('Error', 'Could not open directions');
-      });
-    } catch (err) {
-      logError('Error opening directions', err);
-    }
-  }, []);
-
-  // ============================================
-  // RENDER HELPERS
-  // ============================================
-  const renderRadiusSelector = () => {
-    const radiusOptions = [10, 20, 30, 50];
-    return (
-      <View style={styles.radiusSelector}>
-        <Text style={styles.radiusSelectorLabel}>Search Radius:</Text>
-        <View style={styles.radiusButtonGroup}>
-          {radiusOptions.map((radius) => (
-            <TouchableOpacity
-              key={radius}
-              style={[
-                styles.radiusButton,
-                selectedRadius === radius && styles.radiusButtonActive
-              ]}
-              onPress={() => {
-                handleRadiusChange(radius);
-                handleFetchStations();
-              }}
-            >
-              <Text
-                style={[
-                  styles.radiusButtonText,
-                  selectedRadius === radius && styles.radiusButtonTextActive
-                ]}
-              >
-                {radius}km
-              </Text>
-            </TouchableOpacity>
-          ))}
-        </View>
-      </View>
-    );
-  };
-
-  const renderStationItem = ({ item }) => {
-    return (
-      <View style={styles.stationWrapper}>
-        <View style={styles.stationCardContainer}>
-          <StationCard station={item} />
-        </View>
-
-        <View style={styles.actionButtonsContainer}>
-          <TouchableOpacity
-            style={styles.mapButton}
-            onPress={() => openLocationInMaps(item)}
-            activeOpacity={0.7}
-          >
-            <Text style={styles.mapButtonText}>🗺️ Maps</Text>
-          </TouchableOpacity>
-
-          <TouchableOpacity
-            style={styles.directionsButton}
-            onPress={() => openDirections(item)}
-            activeOpacity={0.7}
-          >
-            <Text style={styles.directionsButtonText}>🧭 Navigate</Text>
-          </TouchableOpacity>
-
-          <TouchableOpacity
-            style={styles.selectButton}
-            onPress={() => {
-              logInfo(`Selected station: ${item.name}`);
-              navigation.navigate('TripPlanner', { selectedStation: item });
-            }}
-            activeOpacity={0.7}
-          >
-            <Text style={styles.selectButtonText}>✓ Select</Text>
-          </TouchableOpacity>
-        </View>
-      </View>
-    );
-  };
-
-  const renderEmptyState = () => (
-    <View style={styles.emptyStateContainer}>
-      <Text style={styles.emptyStateIcon}>⚡</Text>
-      <Text style={styles.emptyStateTitle}>No Stations Found</Text>
-      <Text style={styles.emptyStateSubtitle}>
-        Try expanding the search radius or moving to a different location
-      </Text>
-      <TouchableOpacity style={styles.retryButton} onPress={handleFetchStations}>
-        <Text style={styles.retryButtonText}>🔄 Retry</Text>
-      </TouchableOpacity>
-    </View>
-  );
-
-  const renderErrorState = () => (
-    <View style={styles.errorContainer}>
-      <Text style={styles.errorIcon}>❌</Text>
-      <Text style={styles.errorTitle}>Error Loading Stations</Text>
-      <Text style={styles.errorMessage}>
-        {stationsError || locationError || 'Unknown error'}
-      </Text>
-      <TouchableOpacity style={styles.retryButton} onPress={handleFetchStations}>
-        <Text style={styles.retryButtonText}>🔄 Retry</Text>
-      </TouchableOpacity>
-    </View>
-  );
-
-  // ============================================
-  // HEADER WITH SMART PLANNER BUTTON
-  // ============================================
-  const renderHeader = () => (
-    <View style={styles.header}>
-      <Text style={styles.title}>📍 Charging Stations Near Me</Text>
-      <Text style={styles.subtitle}>
-        {location
-          ? `📌 ${location.latitude.toFixed(4)}, ${location.longitude.toFixed(4)}`
-          : 'Getting your location...'}
-      </Text>
-      
-      {/* ✅ SMART PLANNER BUTTON */}
-      <TouchableOpacity 
-        style={styles.smartPlannerButton}
-        onPress={handleSmartPlanner}
-        activeOpacity={0.7}
-      >
-        <Text style={styles.smartPlannerButtonText}>🧭 Plan Trip →</Text>
-      </TouchableOpacity>
-    </View>
-  );
-
-  // ============================================
-  // RENDER
-  // ============================================
-  return (
-    <View style={styles.container}>
-      {renderHeader()}
-      
-      {renderRadiusSelector()}
-      
-      {!stationsLoading && stationCount > 0 && (
-        <View style={styles.stationCountBadge}>
-          <Text style={styles.stationCountText}>
-            ⚡ {stationCount} Stations within {selectedRadius}km
+// Memoize Item
+const StationItem = memo(({ item, theme }) => (
+  <View style={[styles.card, theme.cardStyle, { backgroundColor: theme.surface }]}>
+    <View style={styles.row}>
+      <View style={{flex: 1}}>
+          <Text style={[styles.name, { color: theme.text }]}>{item.name}</Text>
+          <Text style={[styles.sub, { color: theme.textSecondary }]}>
+              {item.distance ? `${item.distance.toFixed(1)} km • ` : ''} {item.powerkw} kW
           </Text>
-        </View>
-      )}
+      </View>
+      <View style={[styles.scoreBadge, { borderColor: item.scoreColor || theme.primary }]}>
+          <Text style={{ color: item.scoreColor || theme.primary, fontWeight: 'bold' }}>
+              {item.greenScore || '-'}
+          </Text>
+      </View>
+    </View>
+  </View>
+));
 
-      {(stationsError || locationError) && renderErrorState()}
-      
-      {stationsLoading && !stationsError ? (
-        <View style={styles.loadingContainer}>
-          <ActivityIndicator size="large" color="#0066cc" />
-          <Text style={styles.loadingText}>Loading nearby stations...</Text>
+export default function NearMeScreen() {
+  const { theme } = useTheme();
+  const [location, setLocation] = useState(null);
+  const [addressName, setAddressName] = useState('Locating...');
+  const [radius, setRadius] = useState(10);
+  const [stations, setStations] = useState([]);
+  const [loading, setLoading] = useState(false);
+
+  useEffect(() => {
+    (async () => {
+      let { status } = await Location.requestForegroundPermissionsAsync();
+      if (status !== 'granted') return;
+
+      let loc = await Location.getCurrentPositionAsync({});
+      setLocation(loc.coords);
+      updateAddress(loc.coords.latitude, loc.coords.longitude);
+      fetchNearbyStations(loc.coords.latitude, loc.coords.longitude, radius);
+    })();
+  }, []);
+
+  const updateAddress = async (lat, lng) => {
+    try {
+      const [result] = await Location.reverseGeocodeAsync({ latitude: lat, longitude: lng });
+      if (result) {
+        setAddressName(`${result.street || ''}, ${result.city || ''}`.replace(/^, /, ''));
+      }
+    } catch (e) {}
+  };
+
+  const fetchNearbyStations = async (lat, lng, r) => {
+    setLoading(true);
+    try {
+      const data = await api.getNearby(lat, lng, r);
+      setStations(data);
+    } catch (error) {
+      console.error(error);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleRadiusChange = (val) => {
+    setRadius(val);
+    if (location) fetchNearbyStations(location.latitude, location.longitude, val);
+  };
+
+  const renderStationCard = useCallback(({ item }) => (
+    <StationItem item={item} theme={theme} />
+  ), [theme]);
+
+  return (
+    <View style={[styles.container, { backgroundColor: theme.background }]}>
+      {/* MAP VIEW (Top Half) */}
+      <View style={{ height: '40%', width: '100%' }}>
+         {location && (
+            <MapView
+                provider={PROVIDER_GOOGLE}
+                style={{ flex: 1 }}
+                showsUserLocation={true}
+                initialRegion={{
+                    latitude: location.latitude,
+                    longitude: location.longitude,
+                    latitudeDelta: 0.1,
+                    longitudeDelta: 0.1,
+                }}
+            >
+                {stations.map((station, i) => (
+                    <Marker 
+                        key={station.id || i}
+                        coordinate={{ latitude: parseFloat(station.lat), longitude: parseFloat(station.lng) }}
+                        title={station.name}
+                        description={`${station.powerkw} kW`}
+                        pinColor={station.greenScore > 80 ? 'green' : 'orange'}
+                    />
+                ))}
+            </MapView>
+         )}
+      </View>
+
+      {/* CONTROLS & LIST (Bottom Half) */}
+      <View style={{ flex: 1, padding: 15 }}>
+        <View style={[styles.headerRow, {borderBottomColor: theme.border}]}>
+            <Ionicons name="location" size={20} color={theme.primary} />
+            <Text style={[styles.addrText, {color: theme.text}]} numberOfLines={1}>{addressName}</Text>
         </View>
-      ) : stationCount === 0 && !stationsLoading ? (
-        renderEmptyState()
-      ) : (
-        <FlatList
-          data={stations}
-          keyExtractor={(item, idx) => item.id?.toString() || idx.toString()}
-          renderItem={renderStationItem}
-          scrollEnabled={true}
-          refreshControl={
-            <RefreshControl
-              refreshing={isRefreshing}
-              onRefresh={handleRefresh}
-              tintColor="#0066cc"
+
+        <View style={styles.sliderRow}>
+            <Text style={{ color: theme.text }}>Radius: {radius} km</Text>
+            <Slider
+                style={{ flex: 1, marginLeft: 10 }}
+                minimumValue={5} maximumValue={50} step={5}
+                value={radius} onSlidingComplete={handleRadiusChange}
+                minimumTrackTintColor={theme.primary} thumbTintColor={theme.primary}
             />
-          }
-          contentContainerStyle={styles.listContent}
-          ListEmptyComponent={renderEmptyState()}
-        />
-      )}
+        </View>
+
+        {loading ? (
+            <ActivityIndicator color={theme.primary} />
+        ) : (
+            <FlatList
+                data={stations}
+                keyExtractor={(item, index) => item.id || index.toString()}
+                renderItem={renderStationCard}
+                showsVerticalScrollIndicator={false}
+                initialNumToRender={5}
+                maxToRenderPerBatch={5}
+                windowSize={5}
+                removeClippedSubviews={true}
+                ListEmptyComponent={<Text style={{textAlign:'center', color: theme.textSecondary, marginTop: 20}}>No stations found.</Text>}
+            />
+        )}
+      </View>
     </View>
   );
-};
+}
 
-// ============================================
-// STYLES (UNCHANGED)
 const styles = StyleSheet.create({
-  container: {
-    flex: 1,
-    backgroundColor: '#f8f9fa'
-  },
-  header: {
-    backgroundColor: '#fff',
-    paddingHorizontal: 16,
-    paddingVertical: 16,
-    borderBottomWidth: 1,
-    borderBottomColor: '#eee'
-  },
-  title: {
-    fontSize: 24,
-    fontWeight: 'bold',
-    color: '#000',
-    marginBottom: 4
-  },
-  subtitle: {
-    fontSize: 12,
-    color: '#666',
-    fontStyle: 'italic',
-    marginBottom: 12
-  },
-  smartPlannerButton: {
-    backgroundColor: '#0066cc',
-    paddingVertical: 10,
-    paddingHorizontal: 16,
-    borderRadius: 8,
-    alignSelf: 'flex-start'
-  },
-  smartPlannerButtonText: {
-    color: '#fff',
-    fontWeight: '600',
-    fontSize: 14
-  },
-  radiusSelector: {
-    backgroundColor: '#fff',
-    paddingHorizontal: 16,
-    paddingVertical: 12,
-    marginBottom: 8,
-    borderBottomWidth: 1,
-    borderBottomColor: '#eee'
-  },
-  radiusSelectorLabel: {
-    fontSize: 13,
-    fontWeight: '600',
-    color: '#666',
-    marginBottom: 8
-  },
-  radiusButtonGroup: {
-    flexDirection: 'row',
-    gap: 8
-  },
-  radiusButton: {
-    flex: 1,
-    paddingVertical: 8,
-    paddingHorizontal: 12,
-    borderRadius: 6,
-    backgroundColor: '#f0f0f0',
-    alignItems: 'center',
-    borderWidth: 1,
-    borderColor: '#ddd'
-  },
-  radiusButtonActive: {
-    backgroundColor: '#0066cc',
-    borderColor: '#0066cc'
-  },
-  radiusButtonText: {
-    fontSize: 12,
-    fontWeight: '600',
-    color: '#666'
-  },
-  radiusButtonTextActive: {
-    color: '#fff'
-  },
-  stationCountBadge: {
-    backgroundColor: '#e7f3ff',
-    marginHorizontal: 16,
-    marginVertical: 8,
-    paddingHorizontal: 12,
-    paddingVertical: 10,
-    borderRadius: 8,
-    borderLeftWidth: 4,
-    borderLeftColor: '#0066cc'
-  },
-  stationCountText: {
-    fontSize: 13,
-    fontWeight: '600',
-    color: '#0066cc'
-  },
-  loadingContainer: {
-    flex: 1,
-    justifyContent: 'center',
-    alignItems: 'center'
-  },
-  loadingText: {
-    marginTop: 12,
-    fontSize: 14,
-    color: '#666'
-  },
-  listContent: {
-    padding: 16,
-    paddingBottom: 20
-  },
-  stationWrapper: {
-    marginBottom: 12,
-    borderRadius: 8,
-    overflow: 'hidden',
-    backgroundColor: '#fff',
-    borderWidth: 1,
-    borderColor: '#eee'
-  },
-  stationCardContainer: {
-    padding: 12
-  },
-  actionButtonsContainer: {
-    flexDirection: 'row',
-    gap: 8,
-    paddingHorizontal: 12,
-    paddingVertical: 10,
-    borderTopWidth: 1,
-    borderTopColor: '#eee',
-    backgroundColor: '#f9f9f9'
-  },
-  mapButton: {
-    flex: 1,
-    paddingVertical: 8,
-    paddingHorizontal: 12,
-    backgroundColor: '#1976D2',
-    borderRadius: 6,
-    alignItems: 'center'
-  },
-  mapButtonText: {
-    color: '#fff',
-    fontWeight: '600',
-    fontSize: 13
-  },
-  directionsButton: {
-    flex: 1,
-    paddingVertical: 8,
-    paddingHorizontal: 12,
-    backgroundColor: '#F57C00',
-    borderRadius: 6,
-    alignItems: 'center'
-  },
-  directionsButtonText: {
-    color: '#fff',
-    fontWeight: '600',
-    fontSize: 13
-  },
-  selectButton: {
-    flex: 1,
-    paddingVertical: 8,
-    paddingHorizontal: 12,
-    backgroundColor: '#28a745',
-    borderRadius: 6,
-    alignItems: 'center'
-  },
-  selectButtonText: {
-    color: '#fff',
-    fontWeight: '600',
-    fontSize: 13
-  },
-  emptyStateContainer: {
-    flex: 1,
-    justifyContent: 'center',
-    alignItems: 'center',
-    paddingHorizontal: 20
-  },
-  emptyStateIcon: {
-    fontSize: 60,
-    marginBottom: 16
-  },
-  emptyStateTitle: {
-    fontSize: 18,
-    fontWeight: '600',
-    color: '#000',
-    marginBottom: 8,
-    textAlign: 'center'
-  },
-  emptyStateSubtitle: {
-    fontSize: 13,
-    color: '#666',
-    textAlign: 'center',
-    marginBottom: 20
-  },
-  errorContainer: {
-    flex: 1,
-    justifyContent: 'center',
-    alignItems: 'center',
-    paddingHorizontal: 20
-  },
-  errorIcon: {
-    fontSize: 60,
-    marginBottom: 16
-  },
-  errorTitle: {
-    fontSize: 18,
-    fontWeight: '600',
-    color: '#dc3545',
-    marginBottom: 8,
-    textAlign: 'center'
-  },
-  errorMessage: {
-    fontSize: 13,
-    color: '#666',
-    textAlign: 'center',
-    marginBottom: 20
-  },
-  retryButton: {
-    paddingVertical: 10,
-    paddingHorizontal: 20,
-    backgroundColor: '#0066cc',
-    borderRadius: 8
-  },
-  retryButtonText: {
-    color: '#fff',
-    fontWeight: '600',
-    fontSize: 14
-  }
+  container: { flex: 1 },
+  headerRow: { flexDirection: 'row', alignItems: 'center', paddingBottom: 10, borderBottomWidth: 1, marginBottom: 10 },
+  addrText: { marginLeft: 10, fontSize: 16, fontWeight: '600', flex: 1 },
+  sliderRow: { flexDirection: 'row', alignItems: 'center', marginBottom: 10 },
+  card: { padding: 15, marginBottom: 10 },
+  row: { flexDirection: 'row', justifyContent: 'space-between' },
+  name: { fontSize: 16, fontWeight: 'bold' },
+  sub: { fontSize: 12 },
+  scoreBadge: { width: 36, height: 36, borderRadius: 18, borderWidth: 2, justifyContent: 'center', alignItems: 'center' }
 });
-
-export default NearMeScreen;

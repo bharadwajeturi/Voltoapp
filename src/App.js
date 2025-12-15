@@ -1,20 +1,19 @@
-import React from 'react';
-import { LogBox } from 'react-native';
-import { NavigationContainer } from '@react-navigation/native';
-import AppNavigator from '../src/navigation/AppNavigator';
-import { TripProvider } from '../src/context/TripContext';
-import { RouteProvider } from '../src/Hooks/useRoute'; // ✅ IMPORT PROVIDER
+import 'react-native-gesture-handler';
 
-LogBox.ignoreLogs(['Non-serializable values']);
+import { StatusBar } from 'expo-status-bar';
+import { SafeAreaProvider } from 'react-native-safe-area-context';
+import AppNavigator from './navigation/AppNavigator';
+import { ThemeProvider } from './theme/ThemeContext';
+
+// Use GestureHandler for smooth touch interactions
 
 export default function App() {
   return (
-    <NavigationContainer>
-      <TripProvider>
-        <RouteProvider>  {/* ✅ WRAP APP */}
-          <AppNavigator />
-        </RouteProvider>
-      </TripProvider>
-    </NavigationContainer>
+    <SafeAreaProvider>
+      <ThemeProvider>
+        <AppNavigator />
+        <StatusBar style="auto" />
+      </ThemeProvider>
+    </SafeAreaProvider>
   );
 }

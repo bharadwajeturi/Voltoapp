@@ -1,6 +1,11 @@
 {
-  "name": "VoltPathMobile",
-  "android": {
-    "package": "com.anonymous.voltpathmobile"
+  "expo": {
+    "name": "VoltPath",
+    "slug": "voltpath-mobile",
+    
+    "android": {
+      "package": "com.anonymous.voltpathmobile",
+      
+    }
   }
 }
