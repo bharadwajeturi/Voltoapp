@@ -1,195 +1,259 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState } from 'react';
 import { 
-  View, Text, TextInput, TouchableOpacity, StyleSheet, 
-  ActivityIndicator, Switch, ScrollView, Platform, KeyboardAvoidingView, Alert
+  View, Text, TextInput, TouchableOpacity, StyleSheet, ActivityIndicator, 
+  KeyboardAvoidingView, Platform, ScrollView
 } from 'react-native';
-import Slider from '@react-native-community/slider';
-import { Picker } from '@react-native-picker/picker'; 
+import DateTimePicker from '@react-native-community/datetimepicker';
 import { Ionicons } from '@expo/vector-icons';
 import { useNavigation } from '@react-navigation/native';
-import * as Location from 'expo-location';
-
-import { useTheme } from '../theme/ThemeContext';
-import useTripStore from '../store/useTripStore';
-import { api } from '../services/api';
-
-const CAR_MODELS = [
-  { label: 'Select Car Model', value: '' },
-  { label: 'Tata Nexon EV Prime (30kWh)', value: 'Tata Nexon EV Prime', range: 250 },
-  { label: 'Tata Nexon EV Max (40.5kWh)', value: 'Tata Nexon EV Max', range: 350 },
-  { label: 'MG ZS EV (50kWh)', value: 'MG ZS EV', range: 400 },
-  { label: 'Hyundai Kona Electric', value: 'Hyundai Kona', range: 450 },
-  { label: 'Tata Tiago EV', value: 'Tata Tiago EV', range: 200 },
-];
+import { useTripStore } from '../store/useTripStore';
+import { searchPlaces, fetchPlaceDetails } from '../services/api'; 
 
 export default function SmartPlannerScreen() {
-  const { theme, isPremium, toggleTheme } = useTheme();
   const navigation = useNavigation();
-  const { setTripData, setLoading, isLoading } = useTripStore();
+  const setTripData = useTripStore((state) => state.setTripData);
 
-  const [startAddress, setStartAddress] = useState('');
-  const [endAddress, setEndAddress] = useState('');
-  const [selectedCar, setSelectedCar] = useState('');
-  const [battery, setBattery] = useState(100);
-  const [buffer, setBuffer] = useState(20);
+  // --- Form State ---
+  const [start, setStart] = useState(null); 
+  const [end, setEnd] = useState(null);
+  const [queryStart, setQueryStart] = useState('');
+  const [queryEnd, setQueryEnd] = useState('');
+  const [suggestions, setSuggestions] = useState([]);
+  const [activeField, setActiveField] = useState(null);
+  
+  // Battery & Car Details
+  const [battery, setBattery] = useState('80');       
+  const [arrivalBuffer, setArrivalBuffer] = useState('15'); 
+  const [maxRange, setMaxRange] = useState('300'); 
 
-  useEffect(() => {
-    (async () => {
-      let { status } = await Location.requestForegroundPermissionsAsync();
-      if (status === 'granted') {
-        try {
-            let loc = await Location.getCurrentPositionAsync({});
-            // Reverse geocode to get initial address text
-            const [address] = await Location.reverseGeocodeAsync({
-                latitude: loc.coords.latitude,
-                longitude: loc.coords.longitude
-            });
-            if (address) {
-                const addrText = `${address.city || ''}, ${address.region || ''}`;
-                setStartAddress(addrText.replace(/^, /, '')); // Clean up
-            } else {
-                setStartAddress(`${loc.coords.latitude}, ${loc.coords.longitude}`);
-            }
-        } catch (e) {
-            console.log("GPS Error", e);
-        }
-      }
-    })();
-  }, []);
+  // Time State
+  const [startTime, setStartTime] = useState(new Date());
+  const [showTimePicker, setShowTimePicker] = useState(false);
+  const [loading, setLoading] = useState(false);
 
-  const geocodeAddress = async (address) => {
-    try {
-        const result = await Location.geocodeAsync(address);
-        if (result && result.length > 0) {
-            return { latitude: result[0].latitude, longitude: result[0].longitude };
-        }
-    } catch (e) {
-        console.error("Geocoding failed for:", address, e);
+  // --- Search Logic ---
+  const handleSearch = async (text, field) => {
+    if (field === 'start') setQueryStart(text);
+    else setQueryEnd(text);
+    setActiveField(field);
+
+    if (text.length > 2) {
+      const results = await searchPlaces(text);
+      setSuggestions(results);
+    } else {
+      setSuggestions([]);
     }
-    return null;
   };
 
-  const handlePlanTrip = async () => {
-    if (!endAddress || !selectedCar) {
-      Alert.alert("Missing Info", "Please enter a destination and select a car model.");
-      return;
-    }
-
+  const selectLocation = async (place) => {
     setLoading(true);
     try {
-      // 1. Geocode Start (if user changed it) and End
-      let startCoords = await geocodeAddress(startAddress);
-      let endCoords = await geocodeAddress(endAddress);
+        const coords = await fetchPlaceDetails(place.place_id);
+        if (!coords) {
+            alert("Could not fetch location details.");
+            return;
+        }
+        const locationData = { name: place.description, lat: coords.lat, lng: coords.lng };
 
-      // Fallback if geocoding fails (e.g. invalid name)
-      if (!startCoords) {
-         // Try getting current location again if start input failed
-         let loc = await Location.getCurrentPositionAsync({});
-         startCoords = loc.coords;
-      }
-      if (!endCoords) {
-          throw new Error("Could not find destination. Please try a different city name.");
-      }
-
-      const carInfo = CAR_MODELS.find(c => c.value === selectedCar);
-
-      const payload = {
-        start: startCoords,
-        end: endCoords, 
-        carModel: selectedCar,
-        maxRangeKm: carInfo?.range || 300,
-        currentBattery: battery,
-        minBuffer: buffer
-      };
-
-      const data = await api.planTrip(payload);
-      setTripData(data);
-      
-      navigation.navigate('TripDashboard', { screen: 'RoutePlanner' });
-
-    } catch (error) {
-      console.error("Planning Failed:", error);
-      Alert.alert("Planning Failed", error.message || "Server might be offline.");
+        if (activeField === 'start') {
+            setStart(locationData);
+            setQueryStart(locationData.name);
+        } else {
+            setEnd(locationData);
+            setQueryEnd(locationData.name);
+        }
+        setSuggestions([]);
+        setActiveField(null);
+    } catch (e) {
+        console.error(e);
     } finally {
-      setLoading(false);
+        setLoading(false);
     }
   };
 
+  const handlePlanTrip = () => {
+    // 1. Validation
+    if (!start || !end) {
+        alert("Please select start and end locations");
+        return;
+    }
+
+    // 2. Construct Payload
+    // 🟢 This logic is now INSIDE the function (Safe)
+    const payload = {
+        start: { latitude: start.lat, longitude: start.lng },
+        end: { latitude: end.lat, longitude: end.lng },
+        carModel: "Tata Nexon EV", 
+        currentBattery: parseInt(battery) || 80,
+        preferences: { 
+            minBuffer: parseInt(arrivalBuffer) || 15,
+            maxRangeKm: parseInt(maxRange) || 300
+        },
+        startTime: startTime.toISOString()
+    };
+    
+    // 3. Navigate to Loading Screen
+    navigation.navigate('LoadingScreen', { 
+        payload,
+        startName: queryStart.split(',')[0], 
+        endName: queryEnd.split(',')[0]
+    });
+  }; // 🟢 Function correctly closes here
+
   return (
-    <KeyboardAvoidingView behavior={Platform.OS === "ios" ? "padding" : "height"} style={{ flex: 1 }}>
-      <ScrollView style={[styles.container, { backgroundColor: theme.background }]}>
-        <View style={styles.header}>
-          <Text style={[styles.title, { color: theme.text }]}>Smart Planner</Text>
-          <View style={styles.toggleRow}>
-             <Text style={[styles.modeText, {color: theme.textSecondary}]}>{isPremium ? 'Premium' : 'Eco'}</Text>
-             <Switch value={isPremium} onValueChange={toggleTheme} trackColor={{ false: '#ccc', true: theme.primary }} />
-          </View>
-        </View>
+    <View style={styles.container}>
+      <KeyboardAvoidingView 
+        behavior={Platform.OS === "ios" ? "padding" : "height"} 
+        style={{ flex: 1, justifyContent: 'center', padding: 20 }}
+      >
+          <Text style={styles.header}>⚡ VoltPath Planner</Text>
 
-        <View style={[styles.card, theme.cardStyle, { backgroundColor: theme.surface }]}>
+          {/* Start Input */}
           <View style={styles.inputContainer}>
-            <Ionicons name="navigate" size={20} color={theme.primary} />
+            <Ionicons name="location" size={20} color="#2ECC71" />
             <TextInput 
-              style={[styles.input, { color: theme.text }]} value={startAddress} onChangeText={setStartAddress}
-              placeholder="Start Location (City)" placeholderTextColor={theme.textSecondary}
+              style={styles.input} 
+              placeholder="Start Location" 
+              placeholderTextColor="#64748b"
+              value={queryStart}
+              onChangeText={(t) => handleSearch(t, 'start')}
             />
           </View>
-          <View style={{ marginLeft: 20, height: 20, borderLeftWidth: 1, borderLeftColor: theme.border }} />
+
+          {/* End Input */}
           <View style={styles.inputContainer}>
-            <Ionicons name="location" size={20} color={theme.accent} />
+            <Ionicons name="flag" size={20} color="#E74C3C" />
             <TextInput 
-              style={[styles.input, { color: theme.text }]} value={endAddress} onChangeText={setEndAddress}
-              placeholder="Enter Destination (City)" placeholderTextColor={theme.textSecondary}
+              style={styles.input} 
+              placeholder="Destination" 
+              placeholderTextColor="#64748b"
+              value={queryEnd}
+              onChangeText={(t) => handleSearch(t, 'end')}
             />
           </View>
-        </View>
 
-        <Text style={[styles.sectionLabel, { color: theme.textSecondary }]}>VEHICLE</Text>
-        <View style={[styles.card, theme.cardStyle, { backgroundColor: theme.surface, padding: 0 }]}>
-          <Picker selectedValue={selectedCar} onValueChange={(itemValue) => setSelectedCar(itemValue)} style={{ color: theme.text }} dropdownIconColor={theme.text}>
-            {CAR_MODELS.map((car) => (<Picker.Item key={car.value} label={car.label} value={car.value} />))}
-          </Picker>
-        </View>
-
-        <Text style={[styles.sectionLabel, { color: theme.textSecondary }]}>BATTERY STATUS</Text>
-        <View style={[styles.card, theme.cardStyle, { backgroundColor: theme.surface }]}>
-          <View style={styles.sliderGroup}>
-            <View style={styles.row}>
-              <Text style={{ color: theme.text }}>Current Charge</Text>
-              <Text style={{ color: theme.primary, fontWeight: 'bold' }}>{Math.round(battery)}%</Text>
+          {/* Suggestions List */}
+          {suggestions.length > 0 && (
+            <View style={styles.suggestionsBox}>
+              <ScrollView keyboardShouldPersistTaps="handled" style={{ maxHeight: 200 }}>
+                {suggestions.map((item) => (
+                  <TouchableOpacity 
+                    key={item.place_id} 
+                    style={styles.suggestionItem} 
+                    onPress={() => selectLocation(item)}
+                  >
+                    <Text style={styles.suggestionText}>{item.description}</Text>
+                  </TouchableOpacity>
+                ))}
+              </ScrollView>
             </View>
-            <Slider style={{ width: '100%', height: 40 }} minimumValue={10} maximumValue={100} minimumTrackTintColor={theme.primary} thumbTintColor={theme.primary} value={battery} onValueChange={setBattery} />
-          </View>
-          <View style={styles.sliderGroup}>
-            <View style={styles.row}>
-              <Text style={{ color: theme.text }}>Min Arrival Buffer</Text>
-              <Text style={{ color: theme.accent, fontWeight: 'bold' }}>{Math.round(buffer)}%</Text>
-            </View>
-            <Slider style={{ width: '100%', height: 40 }} minimumValue={5} maximumValue={50} minimumTrackTintColor={theme.accent} thumbTintColor={theme.accent} value={buffer} onValueChange={setBuffer} />
-          </View>
-        </View>
+          )}
 
-        <TouchableOpacity style={[styles.planButton, { backgroundColor: theme.primary, shadowColor: theme.shadow }]} onPress={handlePlanTrip} disabled={isLoading}>
-          {isLoading ? <ActivityIndicator color="#fff" /> : <Text style={styles.btnText}>PLAN TRIP ⚡</Text>}
-        </TouchableOpacity>
-        <View style={{height: 50}} /> 
-      </ScrollView>
-    </KeyboardAvoidingView>
+          {/* Car Range Input */}
+          <View style={styles.inputContainer}>
+            <Ionicons name="speedometer" size={20} color="#8E44AD" />
+            <View style={{flex: 1}}>
+                <Text style={styles.label}>Total Range (at 100%)</Text>
+                <TextInput 
+                    style={[styles.input, { height: 30, padding: 0 }]} 
+                    placeholder="300" 
+                    placeholderTextColor="#64748b"
+                    keyboardType="numeric"
+                    maxLength={4}
+                    value={maxRange}
+                    onChangeText={setMaxRange}
+                />
+            </View>
+            <Text style={styles.unitText}>km</Text>
+          </View>
+
+          {/* Battery Row */}
+          <View style={styles.rowContainer}>
+            <View style={[styles.inputContainer, styles.halfInput, { marginRight: 10 }]}>
+                <Ionicons name="battery-charging" size={20} color="#3b82f6" />
+                <View style={{flex: 1}}>
+                    <Text style={styles.label}>Start SOC</Text>
+                    <TextInput 
+                        style={styles.miniInput} 
+                        placeholder="80" 
+                        placeholderTextColor="#64748b"
+                        keyboardType="numeric"
+                        maxLength={3}
+                        value={battery}
+                        onChangeText={setBattery}
+                    />
+                </View>
+                <Text style={styles.unitText}>%</Text>
+            </View>
+
+            <View style={[styles.inputContainer, styles.halfInput]}>
+                <Ionicons name="shield-checkmark" size={20} color="#F1C40F" />
+                <View style={{flex: 1}}>
+                    <Text style={styles.label}>End SOC</Text>
+                    <TextInput 
+                        style={styles.miniInput} 
+                        placeholder="15" 
+                        placeholderTextColor="#64748b"
+                        keyboardType="numeric"
+                        maxLength={2}
+                        value={arrivalBuffer}
+                        onChangeText={setArrivalBuffer}
+                    />
+                </View>
+                <Text style={styles.unitText}>%</Text>
+            </View>
+          </View>
+
+          {/* Time Picker */}
+          <TouchableOpacity style={styles.inputContainer} onPress={() => setShowTimePicker(true)}>
+            <Ionicons name="time" size={20} color="#94a3b8" />
+            <Text style={[styles.input, { marginTop: 4 }]}>
+                Departure: {startTime.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+            </Text>
+          </TouchableOpacity>
+
+          {showTimePicker && (
+            <DateTimePicker
+              value={startTime}
+              mode="time"
+              display="default"
+              onChange={(event, selectedDate) => {
+                setShowTimePicker(false);
+                if (selectedDate) setStartTime(selectedDate);
+              }}
+            />
+          )}
+
+          {/* Plan Button */}
+          <TouchableOpacity style={styles.planButton} onPress={handlePlanTrip} disabled={loading}>
+            {loading ? <ActivityIndicator color="#0f172a" /> : <Text style={styles.btnText}>Plan Route</Text>}
+          </TouchableOpacity>
+
+      </KeyboardAvoidingView>
+    </View>
   );
 }
 
 const styles = StyleSheet.create({
-  container: { flex: 1, padding: 20 },
-  header: { marginTop: 50, marginBottom: 20, flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' },
-  title: { fontSize: 32, fontWeight: 'bold' },
-  toggleRow: { flexDirection: 'row', alignItems: 'center' },
-  modeText: { marginRight: 10, fontSize: 12 },
-  card: { padding: 15, marginBottom: 20 },
-  inputContainer: { flexDirection: 'row', alignItems: 'center' },
-  input: { flex: 1, marginLeft: 10, fontSize: 16, height: 40 },
-  sectionLabel: { fontSize: 12, fontWeight: 'bold', marginBottom: 10, marginLeft: 5 },
-  sliderGroup: { marginBottom: 15 },
-  row: { flexDirection: 'row', justifyContent: 'space-between', marginBottom: 5 },
-  planButton: { height: 60, borderRadius: 16, justifyContent: 'center', alignItems: 'center', elevation: 8, shadowOffset: {width: 0, height: 4}, shadowOpacity: 0.3 },
-  btnText: { color: '#fff', fontSize: 18, fontWeight: 'bold', letterSpacing: 1 }
+  container: { flex: 1, backgroundColor: '#0f172a' },
+  header: { fontSize: 28, fontWeight: 'bold', color: '#fff', marginBottom: 20, textAlign: 'center' },
+  inputContainer: { 
+    flexDirection: 'row', alignItems: 'center', backgroundColor: '#1e293b', 
+    borderRadius: 12, paddingHorizontal: 15, marginBottom: 15, height: 60, zIndex: 1
+  },
+  rowContainer: { flexDirection: 'row', justifyContent: 'space-between', zIndex: 0 },
+  halfInput: { flex: 1 },
+  input: { flex: 1, color: '#fff', marginLeft: 10, fontSize: 16 },
+  miniInput: { color: '#fff', fontSize: 18, fontWeight: 'bold', marginLeft: 10, height: 24, padding: 0 },
+  label: { color: '#64748b', fontSize: 10, marginLeft: 10, textTransform: 'uppercase', fontWeight: 'bold' },
+  unitText: { color: '#64748b', fontWeight: 'bold' },
+  suggestionsBox: { 
+    position: 'absolute', top: 180, left: 20, right: 20, zIndex: 100,
+    backgroundColor: '#1e293b', borderRadius: 10, 
+    borderWidth: 1, borderColor: '#334155', elevation: 10 
+  },
+  suggestionItem: { padding: 15, borderBottomWidth: 1, borderBottomColor: '#334155' },
+  suggestionText: { color: '#fff' },
+  planButton: { backgroundColor: '#2ECC71', padding: 18, borderRadius: 12, alignItems: 'center', marginTop: 10 },
+  btnText: { color: '#0f172a', fontWeight: 'bold', fontSize: 18 }
 });

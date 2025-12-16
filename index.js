@@ -1,8 +1,14 @@
 import { registerRootComponent } from 'expo';
+import App from './src/App';
 
-import App from './src/App'; // Ensure this points to src/App.js
+// 🟢 FIX: Polyfill for libraries expecting 'GLOBAL'
+if (typeof global.self === 'undefined') {
+  global.self = global;
+}
+if (typeof global.window === 'undefined') {
+  global.window = global;
+}
+// Some old libs use 'GLOBAL' instead of 'global'
+global.GLOBAL = global;
 
-// registerRootComponent calls AppRegistry.registerComponent('main', () => App);
-// It also ensures that whether you load the app in Expo Go or in a native build,
-// the environment is set up appropriately
 registerRootComponent(App);

@@ -1,160 +1,127 @@
-import React, { useState, useEffect, useCallback, memo } from 'react';
-import { 
-  View, Text, StyleSheet, FlatList, TouchableOpacity, ActivityIndicator, TextInput, Dimensions
-} from 'react-native';
-import MapView, { Marker, PROVIDER_GOOGLE } from 'react-native-maps';
-import * as Location from 'expo-location';
-import Slider from '@react-native-community/slider';
+import React, { useEffect, useState, useRef } from 'react';
+import { View, Text, StyleSheet, TouchableOpacity, ActivityIndicator } from 'react-native';
+import MapView, { Marker, Circle, PROVIDER_GOOGLE } from 'react-native-maps';
 import { Ionicons } from '@expo/vector-icons';
+import { fetchNearbyStations } from '../services/api';
 
-import { useTheme } from '../theme/ThemeContext';
-import { api } from '../services/api';
-
-const { width, height } = Dimensions.get('window');
-
-// Memoize Item
-const StationItem = memo(({ item, theme }) => (
-  <View style={[styles.card, theme.cardStyle, { backgroundColor: theme.surface }]}>
-    <View style={styles.row}>
-      <View style={{flex: 1}}>
-          <Text style={[styles.name, { color: theme.text }]}>{item.name}</Text>
-          <Text style={[styles.sub, { color: theme.textSecondary }]}>
-              {item.distance ? `${item.distance.toFixed(1)} km • ` : ''} {item.powerkw} kW
-          </Text>
-      </View>
-      <View style={[styles.scoreBadge, { borderColor: item.scoreColor || theme.primary }]}>
-          <Text style={{ color: item.scoreColor || theme.primary, fontWeight: 'bold' }}>
-              {item.greenScore || '-'}
-          </Text>
-      </View>
-    </View>
-  </View>
-));
+const CURRENT_LAT = 17.3850; // Default Hyd
+const CURRENT_LNG = 78.4867;
 
 export default function NearMeScreen() {
-  const { theme } = useTheme();
-  const [location, setLocation] = useState(null);
-  const [addressName, setAddressName] = useState('Locating...');
-  const [radius, setRadius] = useState(10);
+  const mapRef = useRef(null);
   const [stations, setStations] = useState([]);
   const [loading, setLoading] = useState(false);
+  const [rangeKm, setRangeKm] = useState(10); 
 
   useEffect(() => {
-    (async () => {
-      let { status } = await Location.requestForegroundPermissionsAsync();
-      if (status !== 'granted') return;
+    loadStations();
+  }, [rangeKm]);
 
-      let loc = await Location.getCurrentPositionAsync({});
-      setLocation(loc.coords);
-      updateAddress(loc.coords.latitude, loc.coords.longitude);
-      fetchNearbyStations(loc.coords.latitude, loc.coords.longitude, radius);
-    })();
-  }, []);
-
-  const updateAddress = async (lat, lng) => {
-    try {
-      const [result] = await Location.reverseGeocodeAsync({ latitude: lat, longitude: lng });
-      if (result) {
-        setAddressName(`${result.street || ''}, ${result.city || ''}`.replace(/^, /, ''));
-      }
-    } catch (e) {}
-  };
-
-  const fetchNearbyStations = async (lat, lng, r) => {
+  const loadStations = async () => {
     setLoading(true);
     try {
-      const data = await api.getNearby(lat, lng, r);
-      setStations(data);
-    } catch (error) {
-      console.error(error);
+        const data = await fetchNearbyStations(CURRENT_LAT, CURRENT_LNG, rangeKm);
+        setStations(data || []); // 🟢 SAFE DEFAULT
+        
+        mapRef.current?.animateToRegion({
+            latitude: CURRENT_LAT,
+            longitude: CURRENT_LNG,
+            latitudeDelta: (rangeKm * 2) / 111,
+            longitudeDelta: (rangeKm * 2) / 111,
+        }, 1000);
+    } catch (e) {
+        console.error(e);
     } finally {
-      setLoading(false);
+        setLoading(false);
     }
   };
 
-  const handleRadiusChange = (val) => {
-    setRadius(val);
-    if (location) fetchNearbyStations(location.latitude, location.longitude, val);
-  };
-
-  const renderStationCard = useCallback(({ item }) => (
-    <StationItem item={item} theme={theme} />
-  ), [theme]);
-
   return (
-    <View style={[styles.container, { backgroundColor: theme.background }]}>
-      {/* MAP VIEW (Top Half) */}
-      <View style={{ height: '40%', width: '100%' }}>
-         {location && (
-            <MapView
-                provider={PROVIDER_GOOGLE}
-                style={{ flex: 1 }}
-                showsUserLocation={true}
-                initialRegion={{
-                    latitude: location.latitude,
-                    longitude: location.longitude,
-                    latitudeDelta: 0.1,
-                    longitudeDelta: 0.1,
-                }}
+    <View style={styles.container}>
+      <MapView
+        ref={mapRef}
+        provider={PROVIDER_GOOGLE}
+        style={styles.map}
+        initialRegion={{
+          latitude: CURRENT_LAT,
+          longitude: CURRENT_LNG,
+          latitudeDelta: 0.2,
+          longitudeDelta: 0.2,
+        }}
+        customMapStyle={darkMapStyle}
+      >
+        <Marker coordinate={{ latitude: CURRENT_LAT, longitude: CURRENT_LNG }}>
+            <View style={styles.userDot} />
+        </Marker>
+
+        <Circle 
+            center={{ latitude: CURRENT_LAT, longitude: CURRENT_LNG }}
+            radius={rangeKm * 1000}
+            strokeWidth={2}
+            strokeColor="rgba(46, 204, 113, 0.5)"
+            fillColor="rgba(46, 204, 113, 0.1)"
+        />
+
+        {stations.map((s, i) => (
+            <Marker 
+                key={`nm-${s.id || i}`}
+                coordinate={{ latitude: parseFloat(s.lat), longitude: parseFloat(s.lng) }}
+                title={s.name}
             >
-                {stations.map((station, i) => (
-                    <Marker 
-                        key={station.id || i}
-                        coordinate={{ latitude: parseFloat(station.lat), longitude: parseFloat(station.lng) }}
-                        title={station.name}
-                        description={`${station.powerkw} kW`}
-                        pinColor={station.greenScore > 80 ? 'green' : 'orange'}
-                    />
-                ))}
-            </MapView>
-         )}
+                <Ionicons name="location" size={30} color="#E74C3C" />
+            </Marker>
+        ))}
+      </MapView>
+
+      <View style={styles.headerOverlay}>
+        <Text style={styles.title}>Chargers Near Me</Text>
+        <Text style={styles.subtitle}>{stations.length} found within {rangeKm} km</Text>
       </View>
 
-      {/* CONTROLS & LIST (Bottom Half) */}
-      <View style={{ flex: 1, padding: 15 }}>
-        <View style={[styles.headerRow, {borderBottomColor: theme.border}]}>
-            <Ionicons name="location" size={20} color={theme.primary} />
-            <Text style={[styles.addrText, {color: theme.text}]} numberOfLines={1}>{addressName}</Text>
-        </View>
-
-        <View style={styles.sliderRow}>
-            <Text style={{ color: theme.text }}>Radius: {radius} km</Text>
-            <Slider
-                style={{ flex: 1, marginLeft: 10 }}
-                minimumValue={5} maximumValue={50} step={5}
-                value={radius} onSlidingComplete={handleRadiusChange}
-                minimumTrackTintColor={theme.primary} thumbTintColor={theme.primary}
-            />
-        </View>
-
-        {loading ? (
-            <ActivityIndicator color={theme.primary} />
-        ) : (
-            <FlatList
-                data={stations}
-                keyExtractor={(item, index) => item.id || index.toString()}
-                renderItem={renderStationCard}
-                showsVerticalScrollIndicator={false}
-                initialNumToRender={5}
-                maxToRenderPerBatch={5}
-                windowSize={5}
-                removeClippedSubviews={true}
-                ListEmptyComponent={<Text style={{textAlign:'center', color: theme.textSecondary, marginTop: 20}}>No stations found.</Text>}
-            />
-        )}
+      <View style={styles.rangeSelector}>
+        {[5, 10, 20].map((km) => (
+            <TouchableOpacity 
+                key={km} 
+                style={[styles.rangeBtn, rangeKm === km && styles.activeRange]}
+                onPress={() => setRangeKm(km)}
+            >
+                <Text style={[styles.rangeText, rangeKm === km && styles.activeRangeText]}>
+                    {km} km
+                </Text>
+            </TouchableOpacity>
+        ))}
       </View>
+
+      {loading && (
+        <View style={styles.loader}>
+            <ActivityIndicator size="large" color="#2ECC71" />
+        </View>
+      )}
     </View>
   );
 }
 
 const styles = StyleSheet.create({
-  container: { flex: 1 },
-  headerRow: { flexDirection: 'row', alignItems: 'center', paddingBottom: 10, borderBottomWidth: 1, marginBottom: 10 },
-  addrText: { marginLeft: 10, fontSize: 16, fontWeight: '600', flex: 1 },
-  sliderRow: { flexDirection: 'row', alignItems: 'center', marginBottom: 10 },
-  card: { padding: 15, marginBottom: 10 },
-  row: { flexDirection: 'row', justifyContent: 'space-between' },
-  name: { fontSize: 16, fontWeight: 'bold' },
-  sub: { fontSize: 12 },
-  scoreBadge: { width: 36, height: 36, borderRadius: 18, borderWidth: 2, justifyContent: 'center', alignItems: 'center' }
+  container: { flex: 1, backgroundColor: '#0f172a' },
+  map: { flex: 1 },
+  userDot: { width: 16, height: 16, borderRadius: 8, backgroundColor: '#3b82f6', borderWidth: 2, borderColor: '#fff' },
+  headerOverlay: { position: 'absolute', top: 50, left: 20, backgroundColor: 'rgba(15, 23, 42, 0.9)', padding: 15, borderRadius: 12 },
+  title: { color: '#fff', fontSize: 18, fontWeight: 'bold' },
+  subtitle: { color: '#94a3b8', fontSize: 12 },
+  rangeSelector: { position: 'absolute', bottom: 30, left: 20, right: 20, flexDirection: 'row', justifyContent: 'space-around', backgroundColor: '#1e293b', padding: 10, borderRadius: 20 },
+  rangeBtn: { paddingVertical: 8, paddingHorizontal: 20, borderRadius: 15 },
+  activeRange: { backgroundColor: '#2ECC71' },
+  rangeText: { color: '#94a3b8', fontWeight: 'bold' },
+  activeRangeText: { color: '#0f172a' },
+  loader: { position: 'absolute', top: '50%', left: '45%' }
 });
+
+const darkMapStyle = [
+  { "elementType": "geometry", "stylers": [{ "color": "#242f3e" }] },
+  { "elementType": "labels.text.fill", "stylers": [{ "color": "#746855" }] },
+  { "elementType": "labels.text.stroke", "stylers": [{ "color": "#242f3e" }] },
+  { "featureType": "road", "elementType": "geometry", "stylers": [{ "color": "#38414e" }] },
+  { "featureType": "road", "elementType": "geometry.stroke", "stylers": [{ "color": "#212a37" }] },
+  { "featureType": "road", "elementType": "labels.text.fill", "stylers": [{ "color": "#9ca5b3" }] },
+  { "featureType": "water", "elementType": "geometry", "stylers": [{ "color": "#17263c" }] }
+];

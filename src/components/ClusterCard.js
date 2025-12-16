@@ -1,61 +1,91 @@
+import React from 'react';
+import { View, Text, StyleSheet, TouchableOpacity } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
-import { StyleSheet, Text, TouchableOpacity, View } from 'react-native';
-import { useTheme } from '../theme/ThemeContext';
-import GreenScoreBadge from './GreenScoreBadge';
 
-export default function ClusterCard({ item, onAdd }) {
-  const { theme } = useTheme();
-  const bestStation = item.previewStations?.[0] || {};
+// 🟢 Helper to get color based on score
+const getScoreColor = (score) => {
+  if (score >= 80) return '#2ECC71'; // Green
+  if (score >= 50) return '#F1C40F'; // Yellow
+  return '#E74C3C'; // Red
+};
+
+export default function ClusterCard({ area, onPress }) {
+  // 🟢 Guard Clause: Prevent crash if area is undefined
+  if (!area) return null;
+
+  const { name, greenScore, stations = [], previewStations = [] } = area;
+  const count = stations.length;
 
   return (
-    <View style={[styles.card, theme.cardStyle, { backgroundColor: theme.surface }]}>
+    <TouchableOpacity 
+      style={[styles.card, { borderColor: getScoreColor(greenScore) }]} 
+      onPress={onPress}
+      activeOpacity={0.7}
+    >
       {/* Header */}
       <View style={styles.header}>
-        <View style={{ flex: 1 }}>
-          <Text style={[styles.title, { color: theme.text }]}>{item.areaName}</Text>
-          <Text style={[styles.subtitle, { color: theme.textSecondary }]}>
-            {item.distanceFromStartKm} km • {item.totalStationsInArea} chargers
-          </Text>
+        <View>
+            <Text style={styles.title} numberOfLines={1}>{name}</Text>
+            <Text style={styles.subtitle}>{count} Chargers nearby</Text>
         </View>
-        <GreenScoreBadge score={bestStation.greenScore} />
+        <View style={[styles.scoreBadge, { backgroundColor: getScoreColor(greenScore) }]}>
+            <Text style={styles.scoreText}>{greenScore}</Text>
+        </View>
       </View>
 
-      <View style={[styles.divider, { backgroundColor: theme.border }]} />
-
-      {/* Best Pick Row */}
-      <View style={styles.row}>
-        <View style={{ flex: 1 }}>
-          <Text style={[styles.stationName, { color: theme.text }]} numberOfLines={1}>
-            🏆 {bestStation.name || 'Unknown Station'}
-          </Text>
-          <Text style={[styles.details, { color: theme.textSecondary }]}>
-            {bestStation.powerkw} kW • {bestStation.operator}
-          </Text>
-        </View>
-
-        <TouchableOpacity 
-          style={[styles.addBtn, { backgroundColor: theme.primary }]}
-          onPress={() => onAdd(bestStation)}
-        >
-          <Ionicons name="add" size={24} color="#fff" />
-        </TouchableOpacity>
+      {/* Preview List (Top 2 Stations) */}
+      <View style={styles.previewList}>
+        {previewStations.map((station, index) => (
+            <View key={station.id || index} style={styles.stationRow}>
+                <Ionicons name="flash" size={14} color="#cbd5e1" />
+                <Text style={styles.stationName} numberOfLines={1}>
+                    {station.name}
+                </Text>
+                <Text style={styles.powerText}>
+                    {station.powerkw > 0 ? `${station.powerkw}kW` : 'Slow'}
+                </Text>
+            </View>
+        ))}
+        {count > 2 && (
+            <Text style={styles.moreText}>+ {count - 2} more options</Text>
+        )}
       </View>
-    </View>
+
+      {/* Action Hint */}
+      <View style={styles.footer}>
+         <Text style={styles.tapText}>Tap to view all</Text>
+         <Ionicons name="chevron-forward" size={16} color="#64748b" />
+      </View>
+    </TouchableOpacity>
   );
 }
 
 const styles = StyleSheet.create({
-  card: { padding: 16, marginBottom: 12 },
-  header: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'flex-start' },
-  title: { fontSize: 16, fontWeight: 'bold' },
-  subtitle: { fontSize: 12, marginTop: 4 },
-  divider: { height: 1, marginVertical: 12 },
-  row: { flexDirection: 'row', alignItems: 'center' },
-  stationName: { fontSize: 14, fontWeight: '600', marginBottom: 4 },
-  details: { fontSize: 12 },
-  addBtn: {
-    width: 40, height: 40, borderRadius: 20,
-    justifyContent: 'center', alignItems: 'center',
-    shadowOpacity: 0.2, shadowOffset: { width: 0, height: 2 }, elevation: 3
-  }
+  card: {
+    backgroundColor: '#1e293b',
+    borderRadius: 16,
+    padding: 16,
+    marginBottom: 16,
+    borderWidth: 1,
+    // Shadow for depth
+    shadowColor: "#000",
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.3,
+    shadowRadius: 4.65,
+    elevation: 8,
+  },
+  header: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12 },
+  title: { fontSize: 18, fontWeight: 'bold', color: '#fff', width: '80%' },
+  subtitle: { fontSize: 12, color: '#94a3b8', marginTop: 2 },
+  scoreBadge: { width: 36, height: 36, borderRadius: 18, justifyContent: 'center', alignItems: 'center' },
+  scoreText: { color: '#000', fontWeight: 'bold', fontSize: 14 },
+  
+  previewList: { backgroundColor: '#0f172a', borderRadius: 8, padding: 10 },
+  stationRow: { flexDirection: 'row', alignItems: 'center', marginBottom: 6 },
+  stationName: { color: '#e2e8f0', fontSize: 14, marginLeft: 6, flex: 1 },
+  powerText: { color: '#2ECC71', fontSize: 12, fontWeight: 'bold' },
+  moreText: { color: '#64748b', fontSize: 12, marginTop: 4, fontStyle: 'italic' },
+
+  footer: { flexDirection: 'row', justifyContent: 'flex-end', alignItems: 'center', marginTop: 10 },
+  tapText: { color: '#64748b', fontSize: 12, marginRight: 4 }
 });
