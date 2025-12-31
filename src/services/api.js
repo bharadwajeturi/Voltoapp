@@ -1,10 +1,10 @@
 import { Alert } from 'react-native';
-
-// 🟢 CONFIG: Your Local IP (Replace with your actual IP)
-const API_BASE_URL = 'http://192.168.0.136:3000/api'; 
+import axios from 'axios';
+import { API_BASE_URL } from '../config/constants'; // 🟢 Import from Central Config
 
 const TIMEOUT_DURATION = 95000;
 
+// Helper: Timeout Wrapper
 const timeoutPromise = (ms) => {
     return new Promise((_, reject) => {
         setTimeout(() => {
@@ -13,16 +13,16 @@ const timeoutPromise = (ms) => {
     });
 };
 
+// 1. Plan Trip
 export const planTrip = async (tripData) => {
   try {
-    // 🟢 Race: Fetch vs Timeout
     const response = await Promise.race([
         fetch(`${API_BASE_URL}/plan-route`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify(tripData),
         }),
-        timeoutPromise(TIMEOUT_DURATION) // Fails if fetch takes > 15s
+        timeoutPromise(TIMEOUT_DURATION)
     ]);
 
     const data = await response.json();
@@ -30,9 +30,8 @@ export const planTrip = async (tripData) => {
     return data;
 
   } catch (error) {
-    // 🟢 Handle specific timeout error
     if (error.message === "Server timed out. Please try again.") {
-        Alert.alert("Timeout", "The route calculation is taking longer than expected. Please try a shorter route.");
+        Alert.alert("Timeout", "The route calculation is taking longer than expected.");
     } else {
         Alert.alert('Error', error.message);
     }
@@ -40,18 +39,30 @@ export const planTrip = async (tripData) => {
   }
 };
 
-export const fetchNearbyStations = async (lat, lng, radius = 10) => {
+// 2. Fetch Nearby Stations
+export const fetchNearbyStations = async (lat, lng, radiusKm = 5) => {
   try {
-    const response = await fetch(`${API_BASE_URL}/nearby?lat=${lat}&lng=${lng}&r=${radius}`);
-    return await response.json();
+    const response = await axios.get(`${API_BASE_URL}/nearby`, {
+        params: { lat, lng, r: radiusKm }
+    });
+    return response.data;
   } catch (error) {
     console.error('Nearby Fetch Error:', error);
     return [];
   }
 };
 
-// 🟢 NEW: Google Places Autocomplete (Proxied via Backend)
-// Requirement: Backend must have GET /api/places/autocomplete?query=...
+// 3. Verify Station
+export const verifyStationApi = async (payload) => {
+    try {
+        const res = await axios.post(`${API_BASE_URL}/verify`, payload);
+        return res.data;
+    } catch (error) {
+        throw error;
+    }
+};
+
+// 4. Autocomplete
 export const searchPlaces = async (query) => {
   try {
     const response = await fetch(`${API_BASE_URL}/places/autocomplete?query=${encodeURIComponent(query)}`);
@@ -63,21 +74,14 @@ export const searchPlaces = async (query) => {
   }
 };
 
-// Add to src/services/api.js
-
-// 🟢 NEW: Fetch Lat/Lng for a Place ID
+// 5. Place Details
 export const fetchPlaceDetails = async (placeId) => {
   try {
-    // 🟢 CONFIG: Ensure API_BASE_URL is correct (e.g., http://192.168.0.136:3000/api)
     const response = await fetch(`${API_BASE_URL}/places/details?placeId=${placeId}`);
     const data = await response.json();
-    
-    if (data.lat && data.lng) {
-        return data; // Returns { lat: ..., lng: ... }
-    }
-    throw new Error("Invalid location data");
+    return data; 
   } catch (error) {
-    console.warn('Details Fetch Error:', error);
+    console.error('Place Details Error:', error);
     return null;
   }
 };
