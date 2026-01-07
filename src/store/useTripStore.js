@@ -27,7 +27,26 @@ function sanitizeData(stopList) {
             amenities: Array.isArray(station.amenities) ? station.amenities : [],
             address: station.address || ""
         };
-        return item.station ? { ...item, station: safeStation } : safeStation;
+        // 🟢 2. NEW: Sanitize Alternatives (Prevent Crash on Swap)
+        let safeAlternatives = [];
+        if (Array.isArray(item.alternatives)) {
+            safeAlternatives = item.alternatives.map(alt => ({
+                ...alt,
+                id: alt.id || Math.random().toString(),
+                name: alt.name || "Alternative",
+                lat: parseCoord(alt.lat ?? alt.latitude),
+                lng: parseCoord(alt.lng ?? alt.longitude),
+                powerkw: parseFloat(alt.powerkw || 0),
+                connectorTypes: Array.isArray(alt.connectorTypes) ? alt.connectorTypes : ['Unknown'],
+                address: alt.address || ""
+            }));
+        }
+        // Return merged object
+        if (item.station) {
+            return { ...item, station: safeStation, alternatives: safeAlternatives };
+        } else {
+            return item.station ? { ...item, station: safeStation } : safeStation;
+        }
     });
 }
 

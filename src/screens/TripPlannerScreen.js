@@ -1,212 +1,195 @@
 import React, { useState, useRef, useMemo, useEffect } from 'react';
 import { 
-    View, Text, FlatList, StyleSheet, TouchableOpacity, Linking, Dimensions, 
-    Animated, Alert, Modal, TextInput, ScrollView, Platform 
+    View, StyleSheet, FlatList, TextInput, TouchableOpacity, Dimensions, Text
 } from 'react-native';
 import MapView, { Marker, Polyline, PROVIDER_GOOGLE } from 'react-native-maps';
-import polyline from '@mapbox/polyline';
-import { Ionicons, MaterialCommunityIcons } from '@expo/vector-icons';
-import { useTripStore } from '../store/useTripStore';
-import axios from 'axios';
-import AsyncStorage from '@react-native-async-storage/async-storage';
+import { Ionicons } from '@expo/vector-icons';
+import mapboxPolyline from '@mapbox/polyline'; 
 
-const { width, height } = Dimensions.get('window');
-const CARD_WIDTH = width * 0.85; // 85% of screen width for carousel
+// 🟢 Stores & Utils
+import { useTripStore } from '../store/useTripStore';
+import { useStationLogic } from '../Hooks/useStationLogic';
+import { getDistance } from '../utils/distance';
+
+// 🟢 Components
+import StationCard from '../components/common/StationCard';
+
+const { width } = Dimensions.get('window');
+const CARD_WIDTH = width * 0.85; 
 const SPACING = 15;
 
-// 🟢 HELPER: Open Single Station
-const openSingleMap = (lat, lng, name) => {
-    const label = encodeURIComponent(name || "Station");
-    const url = Platform.select({
-        ios: `maps:0,0?q=${label}@${lat},${lng}`,
-        android: `geo:0,0?q=${lat},${lng}(${label})`
-    });
-    Linking.openURL(url).catch(() => Alert.alert("Error", "Could not open map app."));
-};
+// 🟢 1. DEFINE CLUSTER COLORS
+const CLUSTER_COLORS = [
+    '#3b82f6', // Blue
+    '#eab308', // Yellow
+    '#8b5cf6', // Purple
+    '#ec4899', // Pink
+    '#f97316', // Orange
+    '#14b8a6', // Teal
+];
 
-// 🟢 HELPER: Open Google Search (Name + Address)
-const openGoogleSearch = (name, address) => {
-    const query = encodeURIComponent(`${name} ${address || ''} EV Charger`);
-    Linking.openURL(`https://www.google.com/search?q=${query}`);
-};
+// 🟢 2. MUTED DARK MAP STYLE
+const CUSTOM_MAP_STYLE = [
+    { "elementType": "geometry", "stylers": [{ "color": "#242f3e" }] },
+    { "elementType": "labels.text.fill", "stylers": [{ "color": "#757575" }] }, 
+    { "elementType": "labels.text.stroke", "stylers": [{ "color": "#242f3e" }] },
+    { "featureType": "administrative", "elementType": "geometry", "stylers": [{ "color": "#757575" }] },
+    { "featureType": "administrative.country", "elementType": "labels.text.fill", "stylers": [{ "color": "#9e9e9e" }] },
+    { "featureType": "administrative.land_parcel", "stylers": [{ "visibility": "off" }] },
+    { "featureType": "administrative.locality", "elementType": "labels.text.fill", "stylers": [{ "color": "#bdbdbd" }] }, 
+    { "featureType": "poi", "elementType": "labels.text.fill", "stylers": [{ "color": "#757575" }] },
+    { "featureType": "road", "elementType": "geometry.fill", "stylers": [{ "color": "#2c2c2c" }] },
+    { "featureType": "road", "elementType": "labels.text.fill", "stylers": [{ "color": "#8a8a8a" }] },
+    { "featureType": "road.arterial", "elementType": "geometry", "stylers": [{ "color": "#373737" }] },
+    { "featureType": "road.highway", "elementType": "geometry", "stylers": [{ "color": "#3c3c3c" }] },
+    { "featureType": "water", "elementType": "geometry", "stylers": [{ "color": "#000000" }] },
+    { "featureType": "water", "elementType": "labels.text.fill", "stylers": [{ "color": "#3d3d3d" }] }
+];
 
-// 🟢 COMPONENT: Verification Modal
-const VerificationModal = ({ visible, onClose, station, onSubmit }) => {
-    const [power, setPower] = useState('');
-    const [type, setType] = useState('CCS2');
-    const [status, setStatus] = useState('Working'); 
-    const [price, setPrice] = useState('');
-    const [success, setSuccess] = useState(true);
-    const [notes, setNotes] = useState('');
-    
-    useEffect(() => {
-        if(station) {
-            setPower(station.powerkw?.toString() || '');
-            setType(station.connectorTypes?.[0] || 'CCS2');
-            setStatus('Working');
-            setPrice('');
-            setSuccess(true);
-            setNotes('');
-        }
-    }, [station]);
+// 🟢 Helper to safely get Lat/Lng (Handles lat/latitude variations)
+const getLat = (s) => parseFloat(s?.lat || s?.latitude || 0);
+const getLng = (s) => parseFloat(s?.lng || s?.longitude || 0);
 
-    const handleSubmit = () => {
-        onSubmit({ 
-            stationId: station.id, power, type, status, price, 
-            chargeSuccess: success, amenities: notes, timestamp: Date.now() 
-        });
-        onClose();
-    };
-
+// 🟢 INTERNAL: Verification Modal Wrapper
+const VerificationModalWrapper = ({ visible, onClose, station, onSubmit }) => {
+    if (!visible) return null;
     return (
-        <Modal visible={visible} transparent animationType="slide" onRequestClose={onClose}>
-            <View style={styles.modalOverlay}>
-                <View style={styles.modalContent}>
-                    <View style={styles.modalHeader}>
-                        <Text style={styles.modalTitle}>Verify Station</Text>
-                        <TouchableOpacity onPress={onClose}><Ionicons name="close" size={24} color="#94a3b8" /></TouchableOpacity>
-                    </View>
-                    <Text style={styles.modalSub}>{station?.name}</Text>
-                    <ScrollView showsVerticalScrollIndicator={false}>
-                        <View style={styles.chipRow}>
-                            {['Working', 'Busy', 'Broken'].map(s => (
-                                <TouchableOpacity key={s} style={[styles.typeChip, status === s && (s === 'Broken' ? styles.chipRed : styles.activeChip)]} onPress={() => setStatus(s)}>
-                                    <Text style={[styles.chipText, status === s && (s === 'Broken' ? {color:'#fff'} : {color:'#000'})]}>{s}</Text>
-                                </TouchableOpacity>
-                            ))}
-                        </View>
-                        <TouchableOpacity style={[styles.toggleRow, success ? styles.successBorder : styles.failBorder]} onPress={() => setSuccess(!success)}>
-                            <View><Text style={styles.toggleTitle}>Charge Successful?</Text><Text style={styles.toggleSub}>{success ? "Yes" : "No"}</Text></View>
-                            <Ionicons name={success ? "checkmark-circle" : "close-circle"} size={28} color={success ? "#2ECC71" : "#EF4444"} />
-                        </TouchableOpacity>
-                        <TextInput style={styles.modalInput} value={power} onChangeText={setPower} keyboardType="numeric" placeholder="Power (kW)" placeholderTextColor="#64748b" />
-                        <TextInput style={styles.modalInput} value={notes} onChangeText={setNotes} placeholder="Notes..." placeholderTextColor="#64748b" />
-                        <TouchableOpacity style={styles.submitBtn} onPress={handleSubmit}><Text style={styles.submitText}>SUBMIT</Text></TouchableOpacity>
-                    </ScrollView>
-                </View>
+        <View style={styles.modalOverlay}>
+            <View style={styles.modalContent}>
+                <Text style={styles.modalTitle}>Verify {station?.name}</Text>
+                <Text style={styles.modalSub}>Is this station working?</Text>
+                
+                <TouchableOpacity style={styles.submitBtn} onPress={() => onSubmit({ ...station, workingStatus: true, rating: 5 })}>
+                    <Text style={styles.submitText}>Yes, Working</Text>
+                </TouchableOpacity>
+                
+                <TouchableOpacity style={[styles.submitBtn, {backgroundColor:'#EF4444', marginTop:10}]} onPress={onClose}>
+                    <Text style={styles.submitText}>Cancel</Text>
+                </TouchableOpacity>
             </View>
-        </Modal>
+        </View>
     );
 };
 
-// 🟢 Helper: Connector Icons
-const ConnectorBadge = ({ type }) => (
-    <View style={styles.badge}>
-        <MaterialCommunityIcons name="ev-plug-ccs2" size={14} color="#cbd5e1" />
-        <Text style={styles.badgeText}>{type || 'CCS2'}</Text>
-    </View>
-);
-
 export default function TripPlannerScreen() {
-    const toggleStrategy = useTripStore(state => state.toggleStrategy);
     const tripResult = useTripStore(state => state.viewData); 
-    const { selectedStops = [], allStations = [], routePolyline, strategy, startName, endName } = tripResult || {};
-
-    const [verifyModalVisible, setVerifyModalVisible] = useState(false);
-    const [selectedForVerify, setSelectedForVerify] = useState(null);
-    const [searchText, setSearchText] = useState(''); // 🟢 Search State
-    const [selectedId, setSelectedId] = useState(null); 
     
+    // 🟢 Extract Data
+    const { 
+        selectedStops = [], allStations = [], routePolyline, meta 
+    } = tripResult || {};
+
+    const startName = meta?.startName || "Start Location";
+    const endName = meta?.endName || "Destination";
+    
+    const [searchText, setSearchText] = useState('');
+    const [selectedId, setSelectedId] = useState(null);
     const flatListRef = useRef(null);
     const mapRef = useRef(null);
 
-    // Decode Route
+    const { 
+        handleVerifyPress, handleVerificationSubmit, 
+        verifyModalVisible, setVerifyModalVisible, selectedForVerify 
+    } = useStationLogic();
+
     const routePoints = useMemo(() => {
         if (!routePolyline) return [];
-        try { return polyline.decode(routePolyline).map(p => ({ latitude: p[0], longitude: p[1] })); } catch (e) { return []; }
+        try { 
+            return mapboxPolyline.decode(routePolyline).map(p => ({ latitude: p[0], longitude: p[1] })); 
+        } catch (e) { return []; }
     }, [routePolyline]);
 
-    // 🟢 1. UNRESTRICTED ALTERNATIVES
-    const allAlternatives = useMemo(() => {
-        return allStations.map(s => ({
-            ...s,
-            lat: parseFloat(s.lat || s.latitude),
-            lng: parseFloat(s.lng || s.longitude),
-            powerkw: parseFloat(s.powerkw || 0),
-            trustscore: parseFloat(s.trustscore || 0)
-        })).filter(s => !isNaN(s.lat) && !isNaN(s.lng));
-    }, [allStations]);
+    // 🟢 2. SMART COLOR GROUPING & ROBUST DATA PARSING
+    const sortedList = useMemo(() => {
+        const startNode = selectedStops.find(s => s.type === 'START')?.station || { lat: 0, lng: 0 };
 
-    // 🟢 2. MERGE LIST (Raw Data)
-    const rawDataList = useMemo(() => {
-        const plannedIds = new Set(selectedStops.map(s => s.station.id));
-        
-        const planned = selectedStops.map((s, index) => ({ 
-            ...s.station, 
-            uniqueId: `plan_${index}`, 
-            isPlanned: true, 
-            nodeType: s.type, 
-            arrivalSOC: s.arrivalSOC,
-            targetSOC: s.targetSOC, 
-            legDistance: s.legDistance || s.distanceFromLast,
-            lat: parseFloat(s.station.lat),
-            lng: parseFloat(s.station.lng)
-        }));
-        
-        const alts = allAlternatives
-            .filter(s => !plannedIds.has(s.id)) 
-            .map((s, index) => ({ 
-                ...s, 
-                uniqueId: `alt_${index}`,
-                isPlanned: false,
-                nodeType: 'ALTERNATIVE',
-                arrivalSOC: s.arrivalSOC || 0, 
-                legDistance: 0 
-            }));
-        
-        return [...planned, ...alts];
-    }, [selectedStops, allAlternatives]);
+        // A. Process Planned Stops
+        const planned = selectedStops.map((s, i) => {
+            const clusterColor = CLUSTER_COLORS[i % CLUSTER_COLORS.length];
+            
+            // Fix Name
+            let displayName = s.station.name;
+            if (s.type === 'START') displayName = startName;
+            if (s.type === 'DESTINATION') displayName = endName;
 
-    // 🟢 3. FILTER LOGIC (Search)
+            return {
+                ...s.station,
+                name: displayName, 
+                lat: getLat(s.station), 
+                lng: getLng(s.station),
+                uniqueId: `plan_${i}`,
+                nodeType: s.type, 
+                arrivalSOC: s.arrivalSOC,
+                isPlanned: true,
+                sortDist: getDistance(startNode, { lat: getLat(s.station), lng: getLng(s.station) }),
+                uiColor: clusterColor, 
+                stopIndex: i 
+            };
+        });
+
+        const plannedIds = new Set(planned.map(p => p.id));
+        
+        // B. Process ALL Stations (Alternatives)
+        const alternatives = allStations
+            .filter(s => {
+                // Handle nested structure: s might be station object OR { station: ... }
+                const realId = s.station?.id || s.id;
+                return !plannedIds.has(realId);
+            })
+            .map((s, i) => {
+                // 🟢 CRITICAL FIX: Extract actual station data safely
+                const actualStation = s.station || s;
+                
+                const sLat = getLat(actualStation);
+                const sLng = getLng(actualStation);
+
+                // Find color of nearest planned stop
+                let nearestStop = planned[0] || { uiColor: '#94a3b8' };
+                let minDist = 999999;
+
+                if (planned.length > 0) {
+                    planned.forEach(p => {
+                        const d = getDistance({ lat: sLat, lng: sLng }, p);
+                        if (d < minDist) {
+                            minDist = d;
+                            nearestStop = p;
+                        }
+                    });
+                }
+
+                return {
+                    ...actualStation, // Spread actual station properties
+                    lat: sLat,
+                    lng: sLng,
+                    uniqueId: `alt_${i}`,
+                    nodeType: 'ALTERNATIVE',
+                    isPlanned: false,
+                    sortDist: getDistance(startNode, { lat: sLat, lng: sLng }),
+                    uiColor: nearestStop.uiColor 
+                };
+            })
+            // 🟢 Ensure we only keep valid coordinates
+            .filter(s => s.lat !== 0 && s.lng !== 0);
+
+        // C. Merge & Sort
+        return [...planned, ...alternatives].sort((a, b) => a.sortDist - b.sortDist);
+
+    }, [selectedStops, allStations, startName, endName]); 
+
     const filteredList = useMemo(() => {
-        if (!searchText) return rawDataList;
+        if (!searchText) return sortedList;
         const lower = searchText.toLowerCase();
-        return rawDataList.filter(item => 
+        return sortedList.filter(item => 
             (item.name && item.name.toLowerCase().includes(lower)) || 
             (item.address && item.address.toLowerCase().includes(lower))
         );
-    }, [rawDataList, searchText]);
+    }, [sortedList, searchText]);
 
-    // 🟢 4. AUTO-ZOOM TO RESULTS
-    useEffect(() => {
-        if (filteredList.length > 0 && mapRef.current) {
-            const coords = filteredList.map(s => ({ latitude: s.lat, longitude: s.lng }));
-            
-            // If searching, only zoom to results. If cleared, show whole route.
-            if (!searchText && routePoints.length > 0) {
-                coords.push(routePoints[0]);
-                coords.push(routePoints[routePoints.length - 1]);
-            }
-
-            setTimeout(() => {
-                mapRef.current?.fitToCoordinates(coords, {
-                    edgePadding: { top: 100, right: 50, bottom: 250, left: 50 }, // Bottom padding for carousel
-                    animated: true,
-                });
-            }, 500); 
-        }
-    }, [filteredList, searchText]);
-
-    const handleVerificationSubmit = async (data) => {
-        try {
-            const existing = await AsyncStorage.getItem('pending_verifications');
-            const parsed = existing ? JSON.parse(existing) : [];
-            parsed.push(data);
-            await AsyncStorage.setItem('pending_verifications', JSON.stringify(parsed));
-            await axios.post('http://192.168.0.136:3000/api/station/verify', data);
-            const remaining = parsed.filter(i => i.timestamp !== data.timestamp);
-            await AsyncStorage.setItem('pending_verifications', JSON.stringify(remaining));
-            Alert.alert("Success", "Station verified! Trust score updated.");
-        } catch (e) {
-            Alert.alert("Saved Offline", "We'll sync this when you're back online.");
-        }
-    };
-
-    // 🟢 SYNC: Scroll Carousel -> Map Marker
+    // Map Sync Logic
     const handleViewableItemsChanged = useRef(({ viewableItems }) => {
         if (viewableItems.length > 0) {
             const item = viewableItems[0].item;
-            setSelectedId(item.uniqueId); // Highlight on map
+            setSelectedId(item.uniqueId);
             mapRef.current?.animateToRegion({
                 latitude: item.lat,
                 longitude: item.lng,
@@ -216,103 +199,45 @@ export default function TripPlannerScreen() {
         }
     }).current;
 
-    // 🟢 SYNC: Click Marker -> Scroll Carousel
     const handleMarkerPress = (index, uniqueId) => {
         setSelectedId(uniqueId);
         flatListRef.current?.scrollToIndex({ index, animated: true });
     };
 
     const renderCard = ({ item }) => {
-        const socColor = (item.arrivalSOC || 0) < 20 ? '#EF4444' : (item.arrivalSOC || 0) < 40 ? '#F59E0B' : '#10B981';
         const isStart = item.nodeType === 'START';
-        const isCharger = item.nodeType === 'CHARGER' || item.nodeType === 'ALTERNATIVE';
-
-        let displayName = item.name;
-        if (isStart && startName) displayName = startName;
-        if (item.nodeType === 'DESTINATION' && endName) displayName = endName;
-
-        let badgeText = "ALTERNATIVE";
-        let badgeStyle = styles.altLabel;
-        if (isStart) { badgeText = "TRIP START"; badgeStyle = styles.startLabel; }
-        else if (item.isPlanned) { badgeText = "PLANNED STOP"; badgeStyle = styles.plannedLabel; }
+        
+        const InfoComponent = item.isPlanned && !isStart ? (
+            <View style={{ flexDirection: 'row', alignItems: 'center', gap: 4 }}>
+                <Ionicons name="battery-charging" size={16} color={item.arrivalSOC < 20 ? '#EF4444' : '#2ECC71'} />
+                <Text style={{ color: '#fff', fontWeight: 'bold' }}>{item.arrivalSOC}%</Text>
+            </View>
+        ) : (
+            <View style={{ flexDirection: 'row', alignItems: 'center', gap: 4 }}>
+                <Ionicons name="navigate-circle" size={16} color="#94a3b8" />
+                <Text style={{ color: '#94a3b8', fontSize: 12 }}>{Math.round(item.sortDist)} km</Text>
+            </View>
+        );
 
         return (
-            <TouchableOpacity 
-                activeOpacity={0.9}
-                style={[styles.card, item.isPlanned && styles.plannedCard, isStart && styles.startCard]}
-                onPress={() => mapRef.current?.animateToRegion({ latitude: item.lat, longitude: item.lng, latitudeDelta: 0.05, longitudeDelta: 0.05 }, 500)}
-            >
-                <View style={styles.cardHeader}>
-                    <View style={{flex: 1}}>
-                        <Text style={badgeStyle}>{badgeText}</Text>
-                        <Text style={styles.stationName} numberOfLines={1}>{displayName}</Text>
-                    </View>
-                    {item.isPlanned && (
-                        <View style={{alignItems: 'center'}}>
-                            <View style={[styles.batteryCircle, { borderColor: socColor }]}>
-                                <Text style={[styles.socText, {color: socColor}]}>{item.arrivalSOC}%</Text>
-                            </View>
-                        </View>
-                    )}
-                </View>
-
-                {item.address ? (
-                    <View style={styles.addressContainer}>
-                        <Ionicons name="location-sharp" size={14} color="#3b82f6" style={{marginTop: 2}} />
-                        <Text style={styles.addressText} numberOfLines={1}>{item.address}</Text>
-                    </View>
-                ) : null}
-
-                {isCharger && (
-                    <View style={styles.specsRow}>
-                        {item.connectorTypes?.length > 0 && <ConnectorBadge type={item.connectorTypes[0]} />}
-                        {item.powerkw > 0 && (
-                            <View style={[styles.badge, { backgroundColor: 'rgba(46, 204, 113, 0.1)' }]}>
-                                <Ionicons name="flash" size={14} color="#2ECC71" />
-                                <Text style={[styles.badgeText, {color: '#2ECC71'}]}>{item.powerkw} kW</Text>
-                            </View>
-                        )}
-                        {item.trustscore > 0 && (
-                            <View style={styles.badge}>
-                                <Ionicons name="star" size={14} color="#F1C40F" />
-                                <Text style={[styles.badgeText, {color: '#F1C40F'}]}>{(item.trustscore) / 10}</Text>
-                            </View>
-                        )}
-                    </View>
-                )}
-
-                {/* 🟢 ACTION BUTTONS (Google with Address) */}
-                {!isStart && (
-                    <View style={styles.actionBar}>
-                        <TouchableOpacity style={styles.actionBtn} onPress={() => openGoogleSearch(item.name, item.address)}>
-                            <Ionicons name="logo-google" size={14} color="#94a3b8" />
-                            <Text style={styles.actionText}>Google</Text>
-                        </TouchableOpacity>
-                        <TouchableOpacity style={styles.actionBtn} onPress={() => openSingleMap(item.lat, item.lng, item.name)}>
-                            <Ionicons name="map" size={14} color="#fff" />
-                            <Text style={styles.btnText}>Map</Text>
-                        </TouchableOpacity>
-                        {isCharger && (
-                            <TouchableOpacity style={[styles.actionBtn, styles.verifyBtn]} onPress={() => { setSelectedForVerify(item); setVerifyModalVisible(true); }}>
-                                <Ionicons name="shield-checkmark" size={14} color="#000" />
-                                <Text style={[styles.btnText, {color:'#000'}]}>Verify</Text>
-                            </TouchableOpacity>
-                        )}
-                    </View>
-                )}
-            </TouchableOpacity>
+            <StationCard
+                station={item}
+                isSelected={selectedId === item.uniqueId}
+                style={{ width: CARD_WIDTH, marginRight: SPACING }}
+                onVerifyPress={() => handleVerifyPress(item)}
+                InfoComponent={InfoComponent}
+            />
         );
     };
 
     return (
         <View style={styles.container}>
-            
-            {/* 🟢 SEARCH BAR (Floating on Map) */}
+            {/* Search Bar */}
             <View style={styles.searchWrapper}>
                 <Ionicons name="search" size={20} color="#94a3b8" />
                 <TextInput 
                     style={styles.searchInput}
-                    placeholder="Search Station or Area..."
+                    placeholder="Search along route..."
                     placeholderTextColor="#64748b"
                     value={searchText}
                     onChangeText={setSearchText}
@@ -324,7 +249,7 @@ export default function TripPlannerScreen() {
                 )}
             </View>
 
-            {/* MAP SECTION */}
+            {/* Map */}
             <MapView
                 ref={mapRef}
                 provider={PROVIDER_GOOGLE}
@@ -334,37 +259,50 @@ export default function TripPlannerScreen() {
                     longitude: routePoints[0]?.longitude || 78.486,
                     latitudeDelta: 2, longitudeDelta: 2,
                 }}
+                customMapStyle={CUSTOM_MAP_STYLE} 
             >
-                <Polyline coordinates={routePoints} strokeWidth={4} strokeColor="#3b82f6" zIndex={10} />
+                <Polyline coordinates={routePoints} strokeWidth={4} strokeColor="#94a3b8" zIndex={10} />
                 
-                {/* 🟢 MARKERS (Dots for Alts, Pins for Planned) */}
                 {filteredList.map((item, i) => {
                     const isSelected = selectedId === item.uniqueId;
-                    const showLargePin = item.isPlanned || isSelected;
+                    
+                    let PinContent;
+                    
+                    if (item.nodeType === 'START') {
+                        PinContent = <Ionicons name="location" size={36} color="#2ECC71" />;
+                    } else if (item.nodeType === 'DESTINATION') {
+                        PinContent = <Ionicons name="flag" size={36} color="#E74C3C" />;
+                    } else if (item.isPlanned) {
+                        PinContent = (
+                            <View style={[styles.plannedPin, { backgroundColor: item.uiColor, borderColor: '#fff' }, isSelected && styles.selectedScale]}>
+                                <Text style={styles.pinText}>{item.stopIndex}</Text>
+                            </View>
+                        );
+                    } else {
+                        PinContent = (
+                            <View style={[
+                                styles.altPin, 
+                                { backgroundColor: item.uiColor }, 
+                                isSelected && { borderWidth: 2, borderColor: '#fff', transform: [{scale:1.3}] }
+                            ]}>
+                                <View style={styles.altInnerDot} /> 
+                            </View>
+                        );
+                    }
 
                     return (
                         <Marker 
-                            key={`marker_${i}`}
+                            key={item.uniqueId}
                             coordinate={{ latitude: item.lat, longitude: item.lng }}
-                            zIndex={showLargePin ? 20 : 5} 
+                            zIndex={isSelected || item.isPlanned ? 20 : 5} 
                             onPress={() => handleMarkerPress(i, item.uniqueId)}
                         >
-                            {showLargePin ? (
-                                <View style={[styles.mapPinPlanned, isSelected && {transform: [{scale: 1.2}], borderWidth: 3}]}>
-                                    {item.nodeType === 'START' ? <Ionicons name="location" size={16} color="#2ECC71" /> :
-                                     item.nodeType === 'DESTINATION' ? <Ionicons name="flag" size={16} color="#E74C3C" /> :
-                                     <Text style={styles.mapPinText}>{i+1}</Text>
-                                    }
-                                </View>
-                            ) : (
-                                <View style={styles.mapDotAlt} />
-                            )}
+                            {PinContent}
                         </Marker>
                     );
                 })}
             </MapView>
 
-            {/* 🟢 HORIZONTAL CAROUSEL */}
             <View style={styles.carouselContainer}>
                 <FlatList
                     ref={flatListRef}
@@ -372,7 +310,7 @@ export default function TripPlannerScreen() {
                     renderItem={renderCard}
                     keyExtractor={(item) => item.uniqueId}
                     horizontal
-                    pagingEnabled={false} // Snap to interval manually
+                    pagingEnabled={false}
                     snapToInterval={CARD_WIDTH + SPACING}
                     decelerationRate="fast"
                     showsHorizontalScrollIndicator={false}
@@ -382,10 +320,10 @@ export default function TripPlannerScreen() {
                 />
             </View>
 
-            <VerificationModal 
+            <VerificationModalWrapper 
                 visible={verifyModalVisible} 
-                station={selectedForVerify} 
                 onClose={() => setVerifyModalVisible(false)}
+                station={selectedForVerify}
                 onSubmit={handleVerificationSubmit}
             />
         </View>
@@ -395,98 +333,40 @@ export default function TripPlannerScreen() {
 const styles = StyleSheet.create({
     container: { flex: 1, backgroundColor: '#0f172a' },
     
-    // 🟢 SEARCH STYLE
     searchWrapper: {
-        position: 'absolute',
-        top: 50, // Safe Area Top
-        left: 20,
-        right: 20,
-        backgroundColor: '#1e293b',
-        borderRadius: 12,
-        flexDirection: 'row',
-        alignItems: 'center',
-        paddingHorizontal: 15,
-        height: 50,
-        zIndex: 100, // Float above Map
-        borderWidth: 1,
-        borderColor: '#334155',
-        shadowColor: "#000",
-        shadowOffset: { width: 0, height: 2 },
-        shadowOpacity: 0.3,
-        shadowRadius: 4,
-        elevation: 5
+        position: 'absolute', top: 50, left: 20, right: 20,
+        backgroundColor: '#1e293b', borderRadius: 12,
+        flexDirection: 'row', alignItems: 'center', paddingHorizontal: 15,
+        height: 50, zIndex: 100, borderWidth: 1, borderColor: '#334155',
+        shadowColor: "#000", shadowOpacity: 0.3, shadowRadius: 4, elevation: 5
     },
     searchInput: { flex: 1, color: '#fff', fontSize: 16, marginLeft: 10 },
 
     map: { ...StyleSheet.absoluteFillObject },
-
-    // Markers
-    mapPinPlanned: { backgroundColor: '#3b82f6', width: 24, height: 24, borderRadius: 12, justifyContent: 'center', alignItems: 'center', borderWidth: 2, borderColor: '#fff' },
-    mapPinText: { color: '#fff', fontWeight: 'bold', fontSize: 10 },
-    mapDotAlt: { width: 10, height: 10, borderRadius: 5, backgroundColor: '#94a3b8', borderWidth: 1.5, borderColor: '#fff' }, 
-
-    // Carousel
-    carouselContainer: { position: 'absolute', bottom: 30, width: '100%', zIndex: 10 },
     
-    card: { 
-        backgroundColor: '#1e293b', 
-        width: CARD_WIDTH, 
-        padding: 12, 
-        borderRadius: 12, 
-        marginRight: SPACING, 
-        borderWidth: 1, 
-        borderColor: '#334155',
-        shadowColor: "#000",
-        shadowOffset: { width: 0, height: 2 },
-        shadowOpacity: 0.25,
-        shadowRadius: 3.84,
-        elevation: 5
+    plannedPin: { 
+        width: 32, height: 32, borderRadius: 16, 
+        justifyContent: 'center', alignItems: 'center', 
+        borderWidth: 2, shadowColor: "#000", shadowOpacity: 0.4, shadowOffset: {width:0, height:2}
     },
-    plannedCard: { borderColor: '#3b82f6', backgroundColor: 'rgba(59, 130, 246, 0.95)' }, // Slightly transparent for map visibility
-    startCard: { borderColor: '#2ECC71', backgroundColor: 'rgba(46, 204, 113, 0.95)' },
+    selectedScale: { transform: [{scale: 1.25}], borderWidth: 3 },
+    pinText: { color: '#fff', fontWeight: 'bold', fontSize: 12 },
+    
+    altPin: { 
+        width: 16, height: 16, borderRadius: 8, 
+        justifyContent: 'center', alignItems: 'center',
+        borderWidth: 1, borderColor: 'rgba(255,255,255,0.5)'
+    },
+    altInnerDot: {
+        width: 4, height: 4, borderRadius: 2, backgroundColor: 'rgba(255,255,255,0.8)'
+    },
 
-    cardHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'flex-start' },
-    plannedLabel: { color: '#fff', fontSize: 10, fontWeight: 'bold', marginBottom: 2 },
-    altLabel: { color: '#94a3b8', fontSize: 10, fontWeight: 'bold', marginBottom: 2 },
-    startLabel: { color: '#fff', fontSize: 10, fontWeight: 'bold', marginBottom: 2 },
+    carouselContainer: { position: 'absolute', bottom: 30, width: '100%', zIndex: 10 },
 
-    stationName: { color: '#fff', fontSize: 16, fontWeight: 'bold', maxWidth: '85%' },
-
-    batteryCircle: { width: 36, height: 36, borderRadius: 18, borderWidth: 2, justifyContent: 'center', alignItems: 'center', backgroundColor: '#0f172a', borderColor:'#fff' },
-    socText: { fontSize: 10, fontWeight: 'bold', color: '#fff' },
-
-    addressContainer: { flexDirection: 'row', marginTop: 4, alignItems: 'center', gap: 4 },
-    addressText: { color: '#cbd5e1', fontSize: 11, flex: 1 },
-
-    specsRow: { flexDirection: 'row', gap: 8, marginTop: 8 },
-    badge: { flexDirection: 'row', alignItems: 'center', backgroundColor: '#0f172a', paddingHorizontal: 8, paddingVertical: 4, borderRadius: 6, gap: 4, borderWidth: 1, borderColor: '#334155' },
-    badgeText: { color: '#cbd5e1', fontSize: 10, fontWeight: '600' },
-
-    actionBar: { flexDirection: 'row', marginTop: 10, paddingTop: 10, borderTopWidth: 1, borderTopColor: 'rgba(255,255,255,0.1)', justifyContent: 'flex-end', gap: 8 },
-    actionBtn: { flexDirection: 'row', alignItems: 'center', gap: 4, paddingVertical: 6, paddingHorizontal: 10, borderRadius: 6, backgroundColor: '#0f172a' },
-    verifyBtn: { backgroundColor: '#F59E0B' },
-    actionText: { color: '#cbd5e1', fontSize: 11, fontWeight: '600' },
-    btnText: { color: '#fff', fontSize: 11, fontWeight: 'bold' },
-
-    // Modal
-    modalOverlay: { flex: 1, backgroundColor: 'rgba(0,0,0,0.8)', justifyContent: 'center', padding: 20 },
-    modalContent: { backgroundColor: '#1e293b', borderRadius: 20, padding: 20 },
-    modalHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 15 },
-    modalTitle: { color: '#fff', fontSize: 20, fontWeight: 'bold' },
+    modalOverlay: { flex: 1, backgroundColor: 'rgba(0,0,0,0.8)', justifyContent: 'center', alignItems:'center' },
+    modalContent: { width:'80%', backgroundColor: '#1e293b', padding: 20, borderRadius: 12, borderWidth:1, borderColor:'#334155' },
+    modalTitle: { color: '#fff', fontSize: 18, fontWeight: 'bold', marginBottom: 5 },
     modalSub: { color: '#94a3b8', fontSize: 14, marginBottom: 20 },
-    submitBtn: { backgroundColor: '#3b82f6', paddingVertical: 15, borderRadius: 12, alignItems: 'center', marginTop: 20 },
-    submitText: { color: '#fff', fontWeight: 'bold', fontSize: 16 },
-    inputLabel: { color: '#cbd5e1', fontSize: 12, fontWeight: 'bold', marginBottom: 8, marginTop: 10 },
-    modalInput: { backgroundColor: '#0f172a', color: '#fff', borderRadius: 8, padding: 12, borderWidth: 1, borderColor: '#334155', fontSize: 16 },
-    chipRow: { flexDirection: 'row', gap: 8, flexWrap: 'wrap' },
-    typeChip: { backgroundColor: '#0f172a', paddingHorizontal: 12, paddingVertical: 8, borderRadius: 20, borderWidth: 1, borderColor: '#334155' },
-    activeChip: { backgroundColor: '#2ECC71', borderColor: '#2ECC71' },
-    chipText: { color: '#94a3b8', fontSize: 12, fontWeight: '600' },
-    chipRed: { backgroundColor: '#EF4444', borderColor: '#EF4444' },
-    toggleRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', padding: 12, borderRadius: 12, borderWidth: 1, marginBottom: 15, backgroundColor: '#0f172a' },
-    successBorder: { borderColor: 'rgba(46, 204, 113, 0.5)' },
-    failBorder: { borderColor: 'rgba(239, 68, 68, 0.5)' },
-    toggleTitle: { color: '#fff', fontWeight: 'bold', fontSize: 14 },
-    toggleSub: { color: '#94a3b8', fontSize: 12 },
-    rowInputs: { flexDirection: 'row', justifyContent: 'space-between' }
+    submitBtn: { backgroundColor: '#3b82f6', padding: 12, borderRadius: 8, alignItems: 'center' },
+    submitText: { color: '#fff', fontWeight: 'bold' }
 });

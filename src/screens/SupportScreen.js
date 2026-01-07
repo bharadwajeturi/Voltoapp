@@ -16,12 +16,13 @@ import {
 import { launchCamera, launchImageLibrary } from 'react-native-image-picker'; 
 import LottieView from 'lottie-react-native'; 
 import useTripStore from '../store/useTripStore';
+import { API_BASE_URL } from '../config/constants';
 
 // 🟢 NEW: Voice & TTS Imports
 import Voice from '@react-native-voice/voice';
 import Tts from 'react-native-tts';
 
-const API_URL = "http://192.168.0.136:3000/api/ai"; 
+const API_URL = `${API_BASE_URL}/ai`;
 
 // 🟢 NEW: Dynamic Limits
 const TYPING_LIMIT = 50;

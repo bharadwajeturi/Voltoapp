@@ -1,5 +1,5 @@
 import React from 'react';
-import { View, Text, Alert } from 'react-native';
+import { View, Text } from 'react-native';
 import { NavigationContainer, DefaultTheme } from '@react-navigation/native';
 import { createStackNavigator } from '@react-navigation/stack';
 import { createBottomTabNavigator } from '@react-navigation/bottom-tabs';
@@ -8,7 +8,6 @@ import { Ionicons } from '@expo/vector-icons';
 // Import Screens
 import SmartPlannerScreen from '../screens/SmartPlannerScreen';
 import RoutePlannerScreen from '../screens/RoutePlannerScreen';
-import TripPlannerScreen from '../screens/TripPlannerScreen';
 import NearMeScreen from '../screens/NearMeScreen';
 import LoadingScreen from '../screens/LoadingScreen'; 
 import HelpScreen from '../screens/HelpScreen'; 
@@ -25,7 +24,6 @@ const PremiumScreen = () => (
 );
 
 // 🟢 1. DASHBOARD TABS (Visible ONLY AFTER planning a trip)
-// NOTE: SmartPlanner is NOT here anymore.
 function TripDashboard() {
   const { theme } = useTheme();
 
@@ -44,34 +42,29 @@ function TripDashboard() {
         tabBarInactiveTintColor: theme.textSecondary || '#64748b',
         tabBarIcon: ({ focused, color, size }) => {
           let iconName;
+          
           if (route.name === 'RoutePlanner') iconName = focused ? 'map' : 'map-outline';
-          else if (route.name === 'TripPlanner') iconName = focused ? 'list' : 'list-outline';
           else if (route.name === 'NearMe') iconName = focused ? 'location' : 'location-outline';
           else if (route.name === 'HelpHub') iconName = focused ? 'chatbubble-ellipses' : 'chatbubble-ellipses-outline';
           else if (route.name === 'Premium') iconName = focused ? 'diamond' : 'diamond-outline';
+          
           return <Ionicons name={iconName} size={size} color={color} />;
         },
       })}
     >
+      {/* 🟢 Merged Screen: Map + List */}
       <Tab.Screen 
         name="RoutePlanner" 
         component={RoutePlannerScreen} 
-        options={{ title: 'Map' }} 
+        options={{ title: 'Route' }} 
       />
       
-      <Tab.Screen 
-        name="TripPlanner" 
-        component={TripPlannerScreen} 
-        options={{ title: 'Stops' }} 
-      />
-
       <Tab.Screen 
         name="NearMe" 
         component={NearMeScreen} 
         options={{ title: 'Near Me' }} 
       />
       
-      {/* Help inside Tabs (for when driving) */}
       <Tab.Screen 
         name="HelpHub" 
         component={HelpScreen} 
